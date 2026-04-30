@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-# Optional multiple-testing correction
+# Multiple-testing correction
 try:
     from statsmodels.stats.multitest import multipletests
     STATSMODELS_AVAILABLE = True
