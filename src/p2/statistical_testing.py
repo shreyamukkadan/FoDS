@@ -50,10 +50,10 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Define feature groups
 # ---------------------------------------------------------------------------
-# Binary/categorical features from your earlier code
+# Binary/categorical features from earlier code
 categorical_features = binary_cols + ["Gender", "Thyroid_Cancer_Risk"]
 
-# Continuous features from your earlier code
+# Continuous features from earlier code
 continuous_features = continuous_cols
 
 # Remove duplicates while preserving order
@@ -141,7 +141,7 @@ else:
 chi_results_df["Significant_raw"] = chi_results_df["p_value"] < 0.05
 chi_results_df["Significant_FDR"] = chi_results_df["p_adj"] < 0.05 if STATSMODELS_AVAILABLE else np.nan
 
-# Sort by strongest effect size
+# Sorting by strongest effect size
 chi_results_df = chi_results_df.sort_values("Cramers_V", ascending=False)
 
 print("\nChi-square results (sorted by Cramér's V):")
@@ -227,7 +227,7 @@ else:
 mw_results_df["Significant_raw"] = mw_results_df["p_value"] < 0.05
 mw_results_df["Significant_FDR"] = mw_results_df["p_adj"] < 0.05 if STATSMODELS_AVAILABLE else np.nan
 
-# Sort by absolute effect size
+# Sorting by absolute effect size
 mw_results_df = mw_results_df.reindex(
     mw_results_df["Rank_biserial_r"].abs().sort_values(ascending=False).index
 )
