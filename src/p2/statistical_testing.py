@@ -16,7 +16,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 DATA_PATH = "data/thyroid_cancer_risk_data.csv"
 df = pd.read_csv(DATA_PATH)
-print("Shape of dataset:", df.shape)
 
 # ---------------------------------------------------------------------------
 # FEATURE DEFINITIONS
