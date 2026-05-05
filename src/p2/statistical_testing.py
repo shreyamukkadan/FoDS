@@ -1,28 +1,41 @@
+"""
+Statistical Testing
+
+This script runs the statistical analysis for the project on the cleaned dataset
+provided by the shared preprocessing pipeline from P1.
+
+Tests included:
+    1. Chi-square tests for categorical variables vs. Diagnosis
+    2. Cramer's V as effect size for categorical associations
+    3. Mann-Whitney U tests for continuous variables vs. Diagnosis
+    4. Rank-biserial correlation as effect size for group differences
+    5. Benjamini-Hochberg FDR correction for multiple testing
+"""
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-# Optional multiple-testing correction
 try:
     from statsmodels.stats.multitest import multipletests
     STATSMODELS_AVAILABLE = True
 except ImportError:
-    print("statsmodels not installed — p-value adjustment skipped")
-    print("Install with: pip install statsmodels")
     STATSMODELS_AVAILABLE = False
+    print("statsmodels not installed — FDR correction will be skipped.")
+    print("Install with: pip install statsmodels")
 
-# ---------------------------------------------------------------------------
-# LOAD DATA
-# ---------------------------------------------------------------------------
+from src.preprocessing import load_and_preprocess
+
+
+# =============================================================================
+# CONFIG
+# =============================================================================
+
 DATA_PATH = "data/thyroid_cancer_risk_data.csv"
-df = pd.read_csv(DATA_PATH)
 
-# ---------------------------------------------------------------------------
-# FEATURE DEFINITIONS
-# ---------------------------------------------------------------------------
-continuous_cols = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
+CONTINUOUS_COLS = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
 
-binary_cols = [
+BINARY_COLS = [
     "Family_History",
     "Radiation_Exposure",
     "Iodine_Deficiency",
@@ -31,61 +44,149 @@ binary_cols = [
     "Diabetes"
 ]
 
+CATEGORICAL_FEATURES = BINARY_COLS + ["Gender", "Thyroid_Cancer_Risk"]
+
+
 # =============================================================================
-# 3. STATISTICAL TESTING
+# HELPER FUNCTIONS
 # =============================================================================
 
-print("\n" + "=" * 65)
-print("STATISTICAL TESTING")
+def cramers_v_from_table(contingency_table: pd.DataFrame) -> float:
+    """Compute Cramer's V from a contingency table."""
+    chi2, _, _, _ = stats.chi2_contingency(contingency_table)
+    n = contingency_table.to_numpy().sum()
+    min_dim = min(contingency_table.shape) - 1
 
-# Optional multiple-testing correction
-try:
-    from statsmodels.stats.multitest import multipletests
-    STATSMODELS_AVAILABLE = True
-except ImportError:
-    print("statsmodels not installed — p-value adjustment skipped")
-    print("Install with: pip install statsmodels")
-    STATSMODELS_AVAILABLE = False
+    if n == 0 or min_dim <= 0:
+        return np.nan
+
+    return np.sqrt(chi2 / (n * min_dim))
+
+
+def interpret_cramers_v(v: float) -> str:
+    """Interpret Cramer's V magnitude."""
+    if pd.isna(v):
+        return "NA"
+    if v < 0.10:
+        return "negligible"
+    if v < 0.30:
+        return "small"
+    if v < 0.50:
+        return "medium"
+    return "large"
+
+
+def rank_biserial_from_u(u_stat: float, n1: int, n2: int) -> float:
+    """
+    Compute rank-biserial correlation from Mann-Whitney U.
+    Negative sign means the second group tends to have larger values
+    if group order is Benign first, Malignant second.
+    """
+    if n1 == 0 or n2 == 0:
+        return np.nan
+    return 1 - (2 * u_stat) / (n1 * n2)
+
+
+def interpret_rank_biserial(r: float) -> str:
+    """Interpret rank-biserial effect size by absolute magnitude."""
+    if pd.isna(r):
+        return "NA"
+    abs_r = abs(r)
+    if abs_r < 0.10:
+        return "negligible"
+    if abs_r < 0.30:
+        return "small"
+    if abs_r < 0.50:
+        return "medium"
+    return "large"
+
+
+def apply_fdr_correction(df_results: pd.DataFrame, p_col: str = "p_value") -> pd.DataFrame:
+    """Apply Benjamini-Hochberg FDR correction if statsmodels is available."""
+    df_results = df_results.copy()
+    df_results["p_adj"] = np.nan
+    df_results["Significant_raw"] = df_results[p_col] < 0.05
+    df_results["Significant_FDR"] = np.nan
+
+    if STATSMODELS_AVAILABLE:
+        valid_mask = df_results[p_col].notna()
+        if valid_mask.sum() > 0:
+            df_results.loc[valid_mask, "p_adj"] = multipletests(
+                df_results.loc[valid_mask, p_col],
+                method="fdr_bh"
+            )[1]
+            df_results["Significant_FDR"] = df_results["p_adj"] < 0.05
+
+    return df_results
+
+
+# =============================================================================
+# LOAD CLEANED DATA
+# =============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 3 — STATISTICAL TESTING")
+print("=" * 70)
+
+
+X_train_sc, X_test_sc, y_train, y_test, feature_names = load_and_preprocess(
+    data_path=DATA_PATH,
+    random_state=42,
+    test_size=0.2,
+    verbose=True
+)
 
 # ---------------------------------------------------------------------------
-# Define feature groups
+# Rebuild cleaned full dataset for statistical testing
 # ---------------------------------------------------------------------------
-# Binary/categorical features from your earlier code
-categorical_features = binary_cols + ["Gender", "Thyroid_Cancer_Risk"]
 
-# Continuous features from your earlier code
-continuous_features = continuous_cols
+df_raw = pd.read_csv(DATA_PATH)
+df_raw = df_raw.dropna().copy()
 
-# Remove duplicates while preserving order
-categorical_features = list(dict.fromkeys(categorical_features))
-continuous_features = list(dict.fromkeys(continuous_features))
+# Removing outliers as in P1's preprocessing
+z_scores = df_raw[CONTINUOUS_COLS].apply(stats.zscore)
+mask_clean = (z_scores.abs() <= 3).all(axis=1)
+df_clean = df_raw.loc[mask_clean].copy()
 
-# Split original dataframe by diagnosis
-benign = df[df["Diagnosis"] == "Benign"]
-malignant = df[df["Diagnosis"] == "Malignant"]
+# Encoding variables for statistical testing
+for col in BINARY_COLS:
+    df_clean[col] = (df_clean[col] == "Yes").astype(int)
+
+df_clean["Gender"] = (df_clean["Gender"] == "Male").astype(int)
+df_clean["Diagnosis"] = (df_clean["Diagnosis"] == "Malignant").astype(int)
+
+
+print("\nCleaned dataset ready for statistics:")
+print(f"Rows used for stats: {len(df_clean):,}")
+
+benign = df_clean[df_clean["Diagnosis"] == 0]
+malignant = df_clean[df_clean["Diagnosis"] == 1]
+
+print(f"Benign cases:    {len(benign):,}")
+print(f"Malignant cases: {len(malignant):,}")
 
 print("\nCategorical features tested:")
-print(categorical_features)
+print(CATEGORICAL_FEATURES)
 
 print("\nContinuous features tested:")
-print(continuous_features)
+print(CONTINUOUS_COLS)
+
 
 # =============================================================================
-# 3A. CHI-SQUARE TESTS FOR CATEGORICAL FEATURES
+# 3A. CHI-SQUARE TESTS + CRAMER'S V
 # =============================================================================
 
-print("\n--- Chi-square tests + Cramér's V ---")
+print("\n" + "-" * 70)
+print("3A. CHI-SQUARE TESTS + CRAMER'S V")
+print("-" * 70)
 
 chi_results = []
 
-for col in categorical_features:
-    df_test = df[[col, "Diagnosis"]].dropna().copy()
+for col in CATEGORICAL_FEATURES:
+    df_test = df_clean[[col, "Diagnosis"]].dropna().copy()
+    contingency = pd.crosstab(df_test[col], df_test["Diagnosis"])
 
-    # contingency table
-    ct = pd.crosstab(df_test[col], df_test["Diagnosis"])
-
-    # skip if table is invalid
-    if ct.shape[0] < 2 or ct.shape[1] < 2:
+    if contingency.shape[0] < 2 or contingency.shape[1] < 2:
         chi_results.append({
             "Feature": col,
             "Chi2": np.nan,
@@ -97,74 +198,49 @@ for col in categorical_features:
         })
         continue
 
-    chi2, p, dof, expected = stats.chi2_contingency(ct)
-
-    # Cramér's V
-    n = ct.to_numpy().sum()
-    min_dim = min(ct.shape) - 1
-    cramers_v = np.sqrt(chi2 / (n * min_dim)) if min_dim > 0 else np.nan
-
-    # Effect size interpretation
-    if pd.isna(cramers_v):
-        interpretation = "NA"
-    elif cramers_v < 0.10:
-        interpretation = "negligible"
-    elif cramers_v < 0.30:
-        interpretation = "small"
-    elif cramers_v < 0.50:
-        interpretation = "medium"
-    else:
-        interpretation = "large"
+    chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
+    v = cramers_v_from_table(contingency)
 
     chi_results.append({
         "Feature": col,
         "Chi2": chi2,
-        "p_value": p,
+        "p_value": p_value,
         "dof": dof,
-        "Cramers_V": cramers_v,
+        "Cramers_V": v,
         "Min_expected": expected.min(),
-        "Interpretation": interpretation
+        "Interpretation": interpret_cramers_v(v)
     })
 
 chi_results_df = pd.DataFrame(chi_results)
-
-# Multiple testing correction
-if STATSMODELS_AVAILABLE:
-    valid_mask = chi_results_df["p_value"].notna()
-    chi_results_df.loc[valid_mask, "p_adj"] = multipletests(
-        chi_results_df.loc[valid_mask, "p_value"],
-        method="fdr_bh"
-    )[1]
-else:
-    chi_results_df["p_adj"] = np.nan
-
-chi_results_df["Significant_raw"] = chi_results_df["p_value"] < 0.05
-chi_results_df["Significant_FDR"] = chi_results_df["p_adj"] < 0.05 if STATSMODELS_AVAILABLE else np.nan
-
-# Sort by strongest effect size
+chi_results_df = apply_fdr_correction(chi_results_df, p_col="p_value")
 chi_results_df = chi_results_df.sort_values("Cramers_V", ascending=False)
 
-print("\nChi-square results (sorted by Cramér's V):")
+print("\nChi-square results (sorted by Cramer's V):")
 print(
     chi_results_df[
-        ["Feature", "Chi2", "p_value", "p_adj", "Cramers_V",
-         "Interpretation", "Min_expected", "Significant_FDR"]
+        [
+            "Feature", "Chi2", "p_value", "p_adj", "Cramers_V",
+            "Interpretation", "Min_expected", "Significant_FDR"
+        ]
     ].round(4).to_string(index=False)
 )
 
+
 # =============================================================================
-# 3B. MANN-WHITNEY U TESTS FOR CONTINUOUS FEATURES
+# 3B. MANN-WHITNEY U TESTS + RANK-BISERIAL CORRELATION
 # =============================================================================
 
-print("\n--- Mann-Whitney U tests + rank-biserial correlation ---")
+print("\n" + "-" * 70)
+print("3B. MANN-WHITNEY U TESTS + RANK-BISERIAL CORRELATION")
+print("-" * 70)
 
 mw_results = []
 
-for col in continuous_features:
-    df_test = df[[col, "Diagnosis"]].dropna().copy()
+for col in CONTINUOUS_COLS:
+    df_test = df_clean[[col, "Diagnosis"]].dropna().copy()
 
-    benign_vals = df_test[df_test["Diagnosis"] == "Benign"][col]
-    malignant_vals = df_test[df_test["Diagnosis"] == "Malignant"][col]
+    benign_vals = df_test.loc[df_test["Diagnosis"] == 0, col]
+    malignant_vals = df_test.loc[df_test["Diagnosis"] == 1, col]
 
     if len(benign_vals) == 0 or len(malignant_vals) == 0:
         mw_results.append({
@@ -178,56 +254,28 @@ for col in continuous_features:
         })
         continue
 
-    # two-sided Mann-Whitney U test
-    u_stat, p = stats.mannwhitneyu(
+    u_stat, p_value = stats.mannwhitneyu(
         benign_vals,
         malignant_vals,
         alternative="two-sided"
     )
 
-    n1 = len(benign_vals)
-    n2 = len(malignant_vals)
-
-    # Rank-biserial correlation
-    rank_biserial = 1 - (2 * u_stat) / (n1 * n2)
-
-    # Interpret using absolute effect size
-    abs_r = abs(rank_biserial)
-    if abs_r < 0.10:
-        interpretation = "negligible"
-    elif abs_r < 0.30:
-        interpretation = "small"
-    elif abs_r < 0.50:
-        interpretation = "medium"
-    else:
-        interpretation = "large"
+    r_rb = rank_biserial_from_u(u_stat, len(benign_vals), len(malignant_vals))
 
     mw_results.append({
         "Feature": col,
         "Benign_median": benign_vals.median(),
         "Malignant_median": malignant_vals.median(),
+        "Benign_mean": benign_vals.mean(),
+        "Malignant_mean": malignant_vals.mean(),
         "U_stat": u_stat,
-        "p_value": p,
-        "Rank_biserial_r": rank_biserial,
-        "Interpretation": interpretation
+        "p_value": p_value,
+        "Rank_biserial_r": r_rb,
+        "Interpretation": interpret_rank_biserial(r_rb)
     })
 
 mw_results_df = pd.DataFrame(mw_results)
-
-# Multiple testing correction
-if STATSMODELS_AVAILABLE:
-    valid_mask = mw_results_df["p_value"].notna()
-    mw_results_df.loc[valid_mask, "p_adj"] = multipletests(
-        mw_results_df.loc[valid_mask, "p_value"],
-        method="fdr_bh"
-    )[1]
-else:
-    mw_results_df["p_adj"] = np.nan
-
-mw_results_df["Significant_raw"] = mw_results_df["p_value"] < 0.05
-mw_results_df["Significant_FDR"] = mw_results_df["p_adj"] < 0.05 if STATSMODELS_AVAILABLE else np.nan
-
-# Sort by absolute effect size
+mw_results_df = apply_fdr_correction(mw_results_df, p_col="p_value")
 mw_results_df = mw_results_df.reindex(
     mw_results_df["Rank_biserial_r"].abs().sort_values(ascending=False).index
 )
@@ -235,26 +283,45 @@ mw_results_df = mw_results_df.reindex(
 print("\nMann-Whitney U results (sorted by |rank-biserial r|):")
 print(
     mw_results_df[
-        ["Feature", "Benign_median", "Malignant_median", "U_stat", "p_value",
-         "p_adj", "Rank_biserial_r", "Interpretation", "Significant_FDR"]
+        [
+            "Feature", "Benign_median", "Malignant_median",
+            "Benign_mean", "Malignant_mean",
+            "U_stat", "p_value", "p_adj",
+            "Rank_biserial_r", "Interpretation", "Significant_FDR"
+        ]
     ].round(4).to_string(index=False)
 )
 
+
 # =============================================================================
-# 3C. OPTIONAL SUMMARY FOR REPORT WRITING
+# 3C. QUICK SUMMARY
 # =============================================================================
 
-print("\n--- Quick summary for interpretation ---")
+print("\n" + "-" * 70)
+print("3C. QUICK SUMMARY FOR REPORT WRITING")
+print("-" * 70)
 
 if not chi_results_df.empty:
-    top_chi = chi_results_df[["Feature", "Cramers_V", "Interpretation"]].head(5)
     print("\nTop categorical effects:")
-    print(top_chi.round(4).to_string(index=False))
+    print(
+        chi_results_df[
+            ["Feature", "Cramers_V", "Interpretation", "Significant_FDR"]
+        ].head(5).round(4).to_string(index=False)
+    )
+
+    near_zero_cat = chi_results_df[chi_results_df["Cramers_V"] < 0.10]
+    if not near_zero_cat.empty:
+        print("\nCategorical variables with negligible effect sizes:")
+        print(near_zero_cat["Feature"].to_list())
 
 if not mw_results_df.empty:
-    top_mw = mw_results_df[["Feature", "Rank_biserial_r", "Interpretation"]].head(5)
     print("\nTop continuous effects:")
-    print(top_mw.round(4).to_string(index=False))
+    print(
+        mw_results_df[
+            ["Feature", "Rank_biserial_r", "Interpretation", "Significant_FDR"]
+        ].head(5).round(4).to_string(index=False)
+    )
+
 
 # =============================================================================
 # 3D. SAVE OUTPUT TABLES
@@ -263,6 +330,7 @@ if not mw_results_df.empty:
 chi_results_df.to_csv("chi_square_results.csv", index=False)
 mw_results_df.to_csv("mann_whitney_results.csv", index=False)
 
-print("\nSaved:")
+print("\nSaved output files:")
 print(" - chi_square_results.csv")
 print(" - mann_whitney_results.csv")
+print("\nDone.")
