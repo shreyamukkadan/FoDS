@@ -1,0 +1,20 @@
+{
+  "name": "Logistic Regression",
+  "f1": 0.4216,
+  "roc_auc": 0.6245,
+  "model_path": "outputs/p3/best_model.joblib",
+  "feature_names": [
+    "Age",
+    "Gender",
+    "Family_History",
+    "Radiation_Exposure",
+    "Iodine_Deficiency",
+    "Smoking",
+    "Obesity",
+    "Diabetes",
+    "TSH_Level",
+    "T3_Level",
+    "T4_Level",
+    "Nodule_Size"
+  ]
+}
