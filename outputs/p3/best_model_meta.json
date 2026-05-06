@@ -1,8 +1,8 @@
 {
   "name": "Logistic Regression",
   "f1": 0.4216,
-  "roc_auc": 0.6245,
-  "threshold": 0.399,
+  "roc_auc": 0.6248,
+  "threshold": 0.491,
   "model_path": "outputs/p3/best_model.joblib",
   "feature_names": [
     "Age",
@@ -16,6 +16,11 @@
     "TSH_Level",
     "T3_Level",
     "T4_Level",
-    "Nodule_Size"
+    "Nodule_Size",
+    "TSH_T3_ratio",
+    "TSH_T4_ratio",
+    "T3_T4_ratio",
+    "Risk_count",
+    "Age_Nodule"
   ]
 }

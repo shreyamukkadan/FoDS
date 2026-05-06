@@ -1,0 +1,3 @@
+Model,F1,Precision,Recall,Accuracy,ROC-AUC
+Dummy (Majority),0.0,0.0,0.0,0.7673,0.5
+Dummy (Stratified),0.2385,0.239,0.2379,0.6464,0.5041

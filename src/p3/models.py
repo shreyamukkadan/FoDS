@@ -16,6 +16,9 @@ Design principles:
     - F1 is the primary optimisation metric.
     - Classification thresholds are tuned on training data via cross-validated
       probabilities to maximise F1 (default 0.5 is suboptimal under imbalance).
+    - Engineered features (TSH/T3/T4 ratios, Risk_count, Age*Nodule) are
+      added during preprocessing.
+    - Naive baselines (DummyClassifier) provide a lower-bound reference.
 
 Usage (from project root):
     python -m src.p3.models
@@ -32,6 +35,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import zscore
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_predict
@@ -70,6 +74,9 @@ def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True)
         "Family_History", "Radiation_Exposure", "Iodine_Deficiency",
         "Smoking", "Obesity", "Diabetes"
     ]
+    # Feature-engineered continuous columns (added in Step 5b, scaled in Step 9)
+    engineered_cols = ["TSH_T3_ratio", "TSH_T4_ratio", "T3_T4_ratio",
+                       "Risk_count", "Age_Nodule"]
 
     # Step 1: Load data & drop missing values
     df = pd.read_csv(data_path)
@@ -114,11 +121,28 @@ def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True)
     if verbose:
         print(f"[4] Encoded binary columns and Gender as 0/1")
 
+    # Step 5b: Feature Engineering — clinically motivated interactions
+    # These features cannot be learned by linear models and may help
+    # tree-based models surface interactions more efficiently.
+    df_model["TSH_T3_ratio"] = df_model["TSH_Level"] / (df_model["T3_Level"] + 1e-6)
+    df_model["TSH_T4_ratio"] = df_model["TSH_Level"] / (df_model["T4_Level"] + 1e-6)
+    df_model["T3_T4_ratio"]  = df_model["T3_Level"]  / (df_model["T4_Level"] + 1e-6)
+
+    # Cumulative risk factor count (0-6)
+    df_model["Risk_count"] = df_model[binary_cols].sum(axis=1)
+
+    # Age × Nodule_Size interaction (large nodule in older patient = higher risk)
+    df_model["Age_Nodule"] = df_model["Age"] * df_model["Nodule_Size"]
+
+    if verbose:
+        print(f"[5b] Feature engineering: added TSH/T3/T4 ratios, "
+              f"Risk_count, Age_Nodule")
+
     # Step 6: Encode target variable
     df_model["Diagnosis"] = (df_model["Diagnosis"] == "Malignant").astype(int)
 
     if verbose:
-        print(f"[5] Encoded target: Benign=0, Malignant=1")
+        print(f"[6] Encoded target: Benign=0, Malignant=1")
 
     # Step 7: Separate features and target
     X             = df_model.drop(columns=["Diagnosis"])
@@ -126,7 +150,7 @@ def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True)
     feature_names = X.columns.tolist()
 
     if verbose:
-        print(f"\n[6] Features ({len(feature_names)}): {feature_names}")
+        print(f"\n[7] Features ({len(feature_names)}): {feature_names}")
         print(f"    Class balance — "
               f"Benign: {(y==0).sum():,} ({(y==0).mean()*100:.1f}%)  "
               f"Malignant: {(y==1).sum():,} ({(y==1).mean()*100:.1f}%)")
@@ -140,23 +164,26 @@ def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True)
     )
 
     if verbose:
-        print(f"\n[7] Train/test split (stratified, {int((1-test_size)*100)}/{int(test_size*100)}):")
+        print(f"\n[8] Train/test split (stratified, "
+              f"{int((1-test_size)*100)}/{int(test_size*100)}):")
         print(f"    Train: {len(X_train):,} rows — "
               f"Malignant rate: {y_train.mean()*100:.1f}%")
         print(f"    Test:  {len(X_test):,}  rows — "
               f"Malignant rate: {y_test.mean()*100:.1f}%")
 
-    # Step 9: StandardScaler on continuous features
-    scaler     = StandardScaler()
+    # Step 9: StandardScaler on continuous + engineered features
+    scaler        = StandardScaler()
+    cols_to_scale = continuous_cols + engineered_cols
+
     X_train_sc = X_train.copy()
     X_test_sc  = X_test.copy()
-    X_train_sc[continuous_cols] = X_train_sc[continuous_cols].astype(float)
-    X_test_sc[continuous_cols]  = X_test_sc[continuous_cols].astype(float)
-    X_train_sc[continuous_cols] = scaler.fit_transform(X_train[continuous_cols])
-    X_test_sc[continuous_cols]  = scaler.transform(X_test[continuous_cols])
+    X_train_sc[cols_to_scale] = X_train_sc[cols_to_scale].astype(float)
+    X_test_sc[cols_to_scale]  = X_test_sc[cols_to_scale].astype(float)
+    X_train_sc[cols_to_scale] = scaler.fit_transform(X_train[cols_to_scale])
+    X_test_sc[cols_to_scale]  = scaler.transform(X_test[cols_to_scale])
 
     if verbose:
-        print(f"\n[8] StandardScaler applied to: {continuous_cols}")
+        print(f"\n[9] StandardScaler applied to: {cols_to_scale}")
         print(f"    (Scaler fitted on training data only — no leakage)")
         print(f"\nPreprocessing complete. Ready for modelling.")
 
@@ -331,6 +358,144 @@ for name, model in models_to_tune:
 
 
 # =============================================================================
+# 4C. CLASS WEIGHT SENSITIVITY ANALYSIS
+# =============================================================================
+# class_weight='balanced' is just one choice — sklearn computes weights
+# inversely proportional to class frequency. We sweep a range of explicit
+# weight ratios to see whether a different cost-sensitive setting changes
+# the precision/recall trade-off in a meaningful way.
+#
+# For each weight setting:
+#   1. Train the model with that weight
+#   2. Find F1-optimal threshold via cross-validated probabilities
+#   3. Evaluate on test set with that threshold
+#
+# Logistic Regression is used here because it's fast and the trends
+# transfer to RF/XGBoost (boosting/bagging react similarly to class weights).
+
+print("\n" + "-" * 70)
+print("Class weight sensitivity analysis (Logistic Regression)...")
+print("-" * 70)
+
+weight_settings = [
+    ("None (1:1)",       {0: 1, 1: 1}),
+    ("Mild (1:2)",       {0: 1, 1: 2}),
+    ("Moderate (1:3)",   {0: 1, 1: 3}),
+    ("Balanced (auto)",  "balanced"),
+    ("Strong (1:5)",     {0: 1, 1: 5}),
+    ("Aggressive (1:7)", {0: 1, 1: 7}),
+]
+
+cw_results = []
+for label, weight in weight_settings:
+    lr_cw = LogisticRegression(
+        class_weight=weight,
+        max_iter=1000,
+        random_state=RANDOM_STATE,
+        solver="lbfgs",
+    )
+    lr_cw.fit(X_train, y_train)
+
+    thr, f1_cv = find_best_threshold(lr_cw, X_train, y_train, cv)
+
+    y_proba = lr_cw.predict_proba(X_test)[:, 1]
+    y_pred  = (y_proba >= thr).astype(int)
+
+    cw_results.append({
+        "Weight setting": label,
+        "Threshold":      round(thr, 3),
+        "F1":             round(f1_score(y_test, y_pred), 4),
+        "Precision":      round(precision_score(y_test, y_pred), 4),
+        "Recall":         round(recall_score(y_test, y_pred), 4),
+        "Accuracy":       round(accuracy_score(y_test, y_pred), 4),
+        "ROC-AUC":        round(roc_auc_score(y_test, y_proba), 4),
+    })
+
+cw_df = pd.DataFrame(cw_results).set_index("Weight setting")
+print("\nClass weight sensitivity results:")
+print(cw_df.to_string())
+
+_cw_path = os.path.join(OUTPUT_DIR, "class_weight_sensitivity.csv")
+cw_df.to_csv(_cw_path)
+print(f"\nSaved: {_cw_path}")
+
+# Plot: how Precision/Recall/F1 change with class weight
+fig, ax = plt.subplots(figsize=(10, 5))
+labels = cw_df.index.tolist()
+x      = np.arange(len(labels))
+width  = 0.25
+
+ax.bar(x - width, cw_df["Precision"], width, label="Precision",
+       color="#4C72B0", alpha=0.85)
+ax.bar(x,         cw_df["Recall"],    width, label="Recall",
+       color="#55A868", alpha=0.85)
+ax.bar(x + width, cw_df["F1"],        width, label="F1",
+       color="#C44E52", alpha=0.85)
+
+for i, val in enumerate(cw_df["F1"]):
+    ax.text(i + width, val + 0.01, f"{val:.3f}",
+            ha="center", fontsize=8, fontweight="bold")
+
+ax.set_xticks(x)
+ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
+ax.set_ylim(0, 1.05)
+ax.set_ylabel("Score", fontsize=12)
+ax.set_title("Class Weight Sensitivity (Logistic Regression, threshold-tuned)",
+             fontsize=13)
+ax.legend(loc="upper right", fontsize=10)
+ax.grid(axis="y", alpha=0.3)
+fig.tight_layout()
+_cw_plot_path = os.path.join(OUTPUT_DIR, "class_weight_sensitivity.png")
+fig.savefig(_cw_plot_path, dpi=150)
+plt.close(fig)
+print(f"Saved: {_cw_plot_path}")
+
+
+# =============================================================================
+# 4D. NAIVE BASELINES
+# =============================================================================
+# Dummy classifiers establish a lower bound for performance:
+#   - "most_frequent" always predicts the majority class (Benign)
+#   - "stratified"    predicts randomly according to class distribution
+# Our models should clearly outperform both. This proves they actually learn
+# from the features rather than just exploiting class imbalance.
+
+print("\n" + "-" * 70)
+print("Naive baselines (lower bound for model comparison)...")
+print("-" * 70)
+
+baseline_results = []
+baselines = [
+    ("Dummy (Majority)",   DummyClassifier(strategy="most_frequent",
+                                            random_state=RANDOM_STATE)),
+    ("Dummy (Stratified)", DummyClassifier(strategy="stratified",
+                                            random_state=RANDOM_STATE)),
+]
+
+for name, baseline in baselines:
+    baseline.fit(X_train, y_train)
+    y_pred  = baseline.predict(X_test)
+    y_proba = baseline.predict_proba(X_test)[:, 1]
+
+    baseline_results.append({
+        "Model":     name,
+        "F1":        round(f1_score(y_test, y_pred, zero_division=0), 4),
+        "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
+        "Recall":    round(recall_score(y_test, y_pred, zero_division=0), 4),
+        "Accuracy":  round(accuracy_score(y_test, y_pred), 4),
+        "ROC-AUC":   round(roc_auc_score(y_test, y_proba), 4),
+    })
+
+baseline_df = pd.DataFrame(baseline_results).set_index("Model")
+print("\nBaseline performance:")
+print(baseline_df.to_string())
+
+_baseline_path = os.path.join(OUTPUT_DIR, "baseline_comparison.csv")
+baseline_df.to_csv(_baseline_path)
+print(f"\nSaved: {_baseline_path}")
+
+
+# =============================================================================
 # 5. EVALUATION
 # =============================================================================
 
@@ -369,6 +534,20 @@ print("\n" + "=" * 70)
 print("MODEL COMPARISON TABLE (test set, with tuned thresholds)")
 print("=" * 70)
 print(metrics_df.round(4).to_string())
+
+# Combined comparison: models vs baselines (for the report)
+combined_df = pd.concat([
+    metrics_df[["F1", "Precision", "Recall", "Accuracy", "ROC-AUC"]],
+    baseline_df[["F1", "Precision", "Recall", "Accuracy", "ROC-AUC"]],
+])
+print("\n" + "=" * 70)
+print("MODELS vs BASELINES (test set)")
+print("=" * 70)
+print(combined_df.round(4).to_string())
+
+_combined_path = os.path.join(OUTPUT_DIR, "models_vs_baselines.csv")
+combined_df.to_csv(_combined_path)
+print(f"\nSaved: {_combined_path}")
 
 
 # =============================================================================
@@ -441,27 +620,30 @@ fig.savefig(_cm_path, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Saved: {_cm_path}")
 
-# 7C. Metric Bar Chart
+# 7C. Metric Bar Chart (models + baselines)
 metric_cols = ["ROC-AUC", "F1", "Precision", "Recall", "Accuracy"]
-x     = np.arange(len(metric_cols))
-width = 0.8 / len(results)
+all_labels  = [r["Model"] for r in results] + [b["Model"] for b in baseline_results]
+all_values  = [[r[m] for m in metric_cols] for r in results] + \
+              [[b[m] for m in metric_cols] for b in baseline_results]
+all_colors  = COLORS[:len(results)] + ["#999999", "#CCCCCC"]
 
-fig, ax = plt.subplots(figsize=(11, 5))
-for i, r in enumerate(results):
-    vals   = [r[m] for m in metric_cols]
-    offset = (i - len(results) / 2 + 0.5) * width
-    bars = ax.bar(x + offset, vals, width, label=r["Model"],
-                  color=COLORS[i], alpha=0.85)
+x     = np.arange(len(metric_cols))
+width = 0.8 / len(all_labels)
+
+fig, ax = plt.subplots(figsize=(13, 5))
+for i, (label, vals, color) in enumerate(zip(all_labels, all_values, all_colors)):
+    offset = (i - len(all_labels) / 2 + 0.5) * width
+    bars = ax.bar(x + offset, vals, width, label=label, color=color, alpha=0.85)
     for bar, val in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f"{val:.2f}", ha="center", fontsize=8)
+                f"{val:.2f}", ha="center", fontsize=7)
 ax.set_xticks(x)
 ax.set_xticklabels(metric_cols, fontsize=11)
 ax.set_ylim(0, 1.08)
 ax.set_ylabel("Score", fontsize=12)
-ax.set_title("Model Performance Comparison (test set, tuned thresholds)",
+ax.set_title("Model Performance vs Naive Baselines (test set, tuned thresholds)",
              fontsize=13)
-ax.legend(fontsize=10)
+ax.legend(fontsize=9, ncol=2)
 ax.axhline(0.5, color="grey", lw=0.8, linestyle="--", alpha=0.5)
 ax.grid(axis="y", alpha=0.3)
 fig.tight_layout()
@@ -481,9 +663,9 @@ for i, r in enumerate(results):
     ax.scatter(rec[idx], prec[idx], color=COLORS[i],
                s=100, zorder=5, edgecolor="black", linewidth=1.5)
 
-baseline = y_test.mean()
-ax.axhline(baseline, color="grey", lw=0.8, linestyle="--", alpha=0.5,
-           label=f"Random classifier (P = {baseline:.2f})")
+baseline_prec = y_test.mean()
+ax.axhline(baseline_prec, color="grey", lw=0.8, linestyle="--", alpha=0.5,
+           label=f"Random classifier (P = {baseline_prec:.2f})")
 
 ax.set_xlabel("Recall", fontsize=12)
 ax.set_ylabel("Precision", fontsize=12)
