@@ -3,6 +3,7 @@ pandas
 scipy
 scikit-learn
 matplotlib
+seaborn
 joblib
 statsmodels
 xgboost
