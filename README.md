@@ -31,18 +31,18 @@ pip3 install -r requirements.txt
 
 ## Running the analysis
 
-Run scripts from the project root:
+Run the P1 exploratory notebook from the project root:
+
+```bash
+jupyter notebook notebooks/p1_eda.ipynb
+```
+
+Run the P2-P4 scripts from the project root:
 
 ```bash
 python3 -m src.p2.statistical_testing
 python3 -m src.p3.models
 python3 -m src.p4.feature_importance
-```
-
-The P1 exploratory analysis is in:
-
-```text
-notebooks/p1_eda.ipynb
 ```
 
 ## Branch workflow
