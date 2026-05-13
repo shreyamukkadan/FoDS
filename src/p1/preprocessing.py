@@ -1,12 +1,12 @@
 """
-src/preprocessing.py
+src/p1/preprocessing.py
 Thyroid Cancer Risk — Foundations of Data Science Group Project
 
 This file contains the preprocessing pipeline as a clean, importable function.
 It is used by all group members so everyone works with identical cleaned data.
 
 Usage (in any notebook):
-    from src.preprocessing import load_and_preprocess
+    from src.p1.preprocessing import load_and_preprocess
 
     X_train_sc, X_test_sc, y_train, y_test, feature_names = load_and_preprocess(
         data_path="../data/thyroid_cancer_risk_data.csv"
