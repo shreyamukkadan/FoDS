@@ -1,0 +1,5 @@
+step,added_feature,cv_f1,threshold,selected_features
+1,Risk_count,0.392,0.4628,Risk_count
+2,Obesity,0.3994,0.4812,"Risk_count, Obesity"
+3,Diabetes,0.4082,0.4964,"Risk_count, Obesity, Diabetes"
+4,Smoking,0.42,0.5273,"Risk_count, Obesity, Diabetes, Smoking"

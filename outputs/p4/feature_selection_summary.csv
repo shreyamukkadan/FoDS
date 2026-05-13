@@ -1,0 +1,18 @@
+Feature,Forward Selection,Backward Selection,Selected By Both
+Age,No,No,No
+Gender,No,No,No
+Family_History,No,Yes,No
+Radiation_Exposure,No,Yes,No
+Iodine_Deficiency,No,Yes,No
+Smoking,Yes,No,No
+Obesity,Yes,No,No
+Diabetes,Yes,No,No
+TSH_Level,No,No,No
+T3_Level,No,No,No
+T4_Level,No,No,No
+Nodule_Size,No,No,No
+TSH_T3_ratio,No,No,No
+TSH_T4_ratio,No,No,No
+T3_T4_ratio,No,No,No
+Risk_count,Yes,No,No
+Age_Nodule,No,No,No

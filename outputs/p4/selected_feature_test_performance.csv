@@ -1,0 +1,3 @@
+method,n_features,features,threshold,test_f1
+Forward Selection,4,"Risk_count, Obesity, Diabetes, Smoking",0.5302,0.4216
+Backward Selection,3,"Family_History, Radiation_Exposure, Iodine_Deficiency",0.5141,0.4216

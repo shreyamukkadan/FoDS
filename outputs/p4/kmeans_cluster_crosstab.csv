@@ -1,0 +1,3 @@
+Cluster,Benign,Malignant,Majority Diagnosis
+0,74758,22661,Benign
+1,88428,26831,Benign
