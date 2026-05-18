@@ -1,0 +1,11 @@
+Step,Action,Removed feature,Remaining features after step,CV average_precision mean,CV average_precision std,Score change,Accepted
+0,start,,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32377,0.00409,0.0,True
+1,remove,Nodule_Size,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32414,0.00413,0.00037,True
+2,remove,T4_Level,"['Age', 'TSH_Level', 'T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32444,0.00442,0.00029,True
+3,remove,TSH_Level,"['Age', 'T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32475,0.00443,0.00031,True
+4,remove,Diabetes,"['Age', 'T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Gender']",0.32509,0.00424,0.00034,True
+5,remove,Smoking,"['Age', 'T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Obesity', 'Gender']",0.32514,0.00429,5e-05,True
+6,remove,Obesity,"['Age', 'T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Gender']",0.32513,0.00442,-1e-05,True
+7,remove,Age,"['T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Gender']",0.32511,0.00428,-2e-05,True
+8,remove,Gender,"['T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency']",0.32482,0.00431,-0.00029,True
+9,stop,Radiation_Exposure,"['T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency']",0.3103,0.00207,-0.01451,False
