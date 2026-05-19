@@ -1,4 +1,4 @@
 Feature set,n_features,Features,CV average_precision mean,CV average_precision std,CV ROC-AUC mean,CV ROC-AUC std
-All retained features,12,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32377,0.00409,0.62274,0.00378
-Binary risk factors + Gender,7,"['Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.321,0.00374,0.62261,0.00365
-Clinical continuous only,5,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size']",0.23375,0.00099,0.50122,0.00141
+All retained features,12,"['Age', 'Gender', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size']",0.32355,0.00312,0.62235,0.00196
+Binary risk factors + Gender,7,"['Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.3207,0.00267,0.62182,0.00203
+Clinical continuous only,5,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size']",0.23406,0.00119,0.50272,0.00238

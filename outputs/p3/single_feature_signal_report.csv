@@ -1,13 +1,13 @@
 Feature,CV average_precision mean,CV average_precision std,CV ROC-AUC mean,Random-like flag
-Family_History,0.2703,0.0012,0.57582,False
-Iodine_Deficiency,0.25638,0.00099,0.55059,False
-Radiation_Exposure,0.25113,0.00188,0.5373,False
-TSH_Level,0.23484,0.00076,0.50257,True
-T3_Level,0.2335,0.0013,0.50266,True
-T4_Level,0.23347,0.00303,0.50183,True
-Gender,0.23326,0.0011,0.50152,True
-Diabetes,0.23324,0.00056,0.50148,True
-Obesity,0.23305,0.0004,0.50095,True
-Smoking,0.23215,0.00062,0.49841,True
-Nodule_Size,0.23205,0.00329,0.49703,True
-Age,0.23078,0.00079,0.49752,True
+Family_History,0.2708,0.00131,0.57663,False
+Iodine_Deficiency,0.25634,0.00125,0.5505,False
+Radiation_Exposure,0.25054,0.00205,0.53632,False
+TSH_Level,0.23471,0.00038,0.50259,True
+Nodule_Size,0.23467,0.00173,0.50242,True
+T3_Level,0.23386,0.0023,0.5026,True
+T4_Level,0.23369,0.00189,0.50135,True
+Diabetes,0.2331,0.00061,0.50108,True
+Smoking,0.23267,0.00052,0.49986,True
+Gender,0.23215,0.00124,0.49837,True
+Obesity,0.23188,0.00076,0.49762,True
+Age,0.23105,0.00239,0.49792,True

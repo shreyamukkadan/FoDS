@@ -1,4 +1,4 @@
 Feature set,n_features,Features,CV average_precision mean,CV average_precision std
-Forward-selected features,4,"['Family_History', 'Iodine_Deficiency', 'T3_Level', 'Radiation_Exposure']",0.32482,0.00431
-Backward-selected features,4,"['T3_Level', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency']",0.32482,0.00431
-Full retained features,12,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender']",0.32377,0.00409
+Forward-selected features,4,"['Family_History', 'Iodine_Deficiency', 'T3_Level', 'Radiation_Exposure']",0.3244,0.00336
+Backward-selected features,4,"['Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'T3_Level']",0.3244,0.00336
+Full retained features,12,"['Age', 'Gender', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size']",0.32355,0.00312
