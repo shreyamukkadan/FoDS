@@ -1,0 +1,10 @@
+Model,Strategy,Mode,Threshold,CV Precision,CV Recall,F1,Precision,Recall,Accuracy,ROC-AUC,Average Precision,Note
+Logistic Regression,F1-optimal (screening),f1,0.507,0.2985,0.7091,0.4216,0.2999,0.7097,0.5469,0.624,0.3286,
+Logistic Regression,F0.5-optimal (precision-leaning),f05,0.554,0.3266,0.4498,0.3789,0.3245,0.4551,0.6528,0.624,0.3286,
+Logistic Regression,Min-precision>=0.50,min_precision,0.793,0.5,0.0014,0.0,0.0,0.0,0.7673,0.624,0.3286,
+Random Forest,F1-optimal (screening),f1,0.398,0.2978,0.7111,0.4212,0.2991,0.712,0.5447,0.6244,0.3258,
+Random Forest,F0.5-optimal (precision-leaning),f05,0.557,0.3239,0.4435,0.3763,0.3238,0.4492,0.6536,0.6244,0.3258,
+Random Forest,Min-precision>=0.50,min_precision,0.763,0.5,0.0048,0.0088,0.5116,0.0044,0.7674,0.6244,0.3258,
+XGBoost,F1-optimal (screening),f1,0.469,0.2983,0.7096,0.4216,0.2999,0.7095,0.547,0.6244,0.3276,
+XGBoost,F0.5-optimal (precision-leaning),f05,0.557,0.3261,0.447,0.3743,0.3232,0.4446,0.6541,0.6244,0.3276,
+XGBoost,Min-precision>=0.50,min_precision,0.754,0.5021,0.003,0.003,0.5769,0.0015,0.7674,0.6244,0.3276,

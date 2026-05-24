@@ -1,730 +1,438 @@
 """
-src/p3/models.py
-Thyroid Cancer Risk — Foundations of Data Science Group Project
-
-P3: Model Training and Evaluation
-
-Models trained:
-    1. Logistic Regression  — linear baseline
-    2. Random Forest        — GridSearchCV, 5-fold stratified CV
-    3. XGBoost              — GridSearchCV, 5-fold stratified CV
-
-Design principles:
-    - Thyroid_Cancer_Risk is excluded at the preprocessing stage (P1).
-    - class_weight='balanced' / scale_pos_weight handles class imbalance.
-    - All hyperparameter tuning happens exclusively on training data.
-    - F1 is the primary optimisation metric.
-    - Classification thresholds are tuned on training data via cross-validated
-      probabilities to maximise F1 (default 0.5 is suboptimal under imbalance).
-    - Engineered features (TSH/T3/T4 ratios, Risk_count, Age*Nodule) are
-      added during preprocessing.
-    - Naive baselines (DummyClassifier) provide a lower-bound reference.
-
-Usage (from project root):
+src/p3/models.py — compact P3 model pipeline
+Run from project root:
     python -m src.p3.models
+Requires:
+    data/thyroid_cancer_risk_data.csv
+    src/preprocessing.py with load_and_preprocess(...)
+Outputs:
+    outputs/p3/*.csv, *.json, *.png, *.joblib
 """
-
 import json
 import os
 import warnings
-
+from typing import Dict, List, Tuple
 import joblib
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import zscore
+from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_predict
-from sklearn.preprocessing import StandardScaler
-
 from sklearn.metrics import (
-    ConfusionMatrixDisplay,
-    accuracy_score,
-    confusion_matrix,
-    f1_score,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-    roc_curve,
+    ConfusionMatrixDisplay, accuracy_score, average_precision_score,
+    confusion_matrix, f1_score, precision_recall_curve, precision_score,
+    recall_score, roc_auc_score, roc_curve,
 )
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
-
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict, cross_val_score
+from src.p1.preprocessing import load_and_preprocess
 warnings.filterwarnings("ignore")
-
 try:
     from xgboost import XGBClassifier
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-    print("XGBoost not installed — XGBoost model will be skipped.")
-    print("Install with: pip install xgboost")
-
-
-def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True):
-    """
-    Loads the thyroid cancer dataset and runs the full preprocessing pipeline.
-    """
-    continuous_cols = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
-    binary_cols     = [
-        "Family_History", "Radiation_Exposure", "Iodine_Deficiency",
-        "Smoking", "Obesity", "Diabetes"
-    ]
-    # Feature-engineered continuous columns (added in Step 5b, scaled in Step 9)
-    engineered_cols = ["TSH_T3_ratio", "TSH_T4_ratio", "T3_T4_ratio",
-                       "Risk_count", "Age_Nodule"]
-
-    # Step 1: Load data & drop missing values
-    df = pd.read_csv(data_path)
-    rows_before_null = len(df)
-    df.dropna(inplace=True)
-
-    if verbose:
-        print(f"[1] Loaded data:         {rows_before_null:,} rows")
-        print(f"    After dropping nulls: {len(df):,} rows "
-              f"({rows_before_null - len(df)} rows dropped)")
-
-    # Step 2: Remove outliers using Z-score (|Z| > 3)
-    z          = df[continuous_cols].apply(zscore)
-    mask_clean = (z.abs() <= 3).all(axis=1)
-    df_clean   = df[mask_clean].copy()
-
-    if verbose:
-        print(f"\n[2] Outlier removal (Z-score |Z|>3):")
-        print(f"    Rows before: {len(df):,}")
-        print(f"    Rows after:  {len(df_clean):,} "
-              f"({len(df) - len(df_clean):,} rows removed, "
-              f"{(1 - len(df_clean)/len(df))*100:.2f}%)")
-
-    # Step 3: Drop columns not used in modelling
-    df_model = df_clean.copy()
-    df_model.drop(
-        columns=["Patient_ID", "Country", "Ethnicity", "Thyroid_Cancer_Risk"],
-        inplace=True
-    )
-
-    if verbose:
-        print(f"\n[3] Dropped columns: Patient_ID, Country, Ethnicity, "
-              f"Thyroid_Cancer_Risk")
-
-    # Step 4: Encode binary Yes/No columns as 0/1
-    for col in binary_cols:
-        df_model[col] = (df_model[col] == "Yes").astype(int)
-
-    # Step 5: Encode Gender as 0/1
-    df_model["Gender"] = (df_model["Gender"] == "Male").astype(int)
-
-    if verbose:
-        print(f"[4] Encoded binary columns and Gender as 0/1")
-
-    # Step 5b: Feature Engineering — clinically motivated interactions
-    # These features cannot be learned by linear models and may help
-    # tree-based models surface interactions more efficiently.
-    df_model["TSH_T3_ratio"] = df_model["TSH_Level"] / (df_model["T3_Level"] + 1e-6)
-    df_model["TSH_T4_ratio"] = df_model["TSH_Level"] / (df_model["T4_Level"] + 1e-6)
-    df_model["T3_T4_ratio"]  = df_model["T3_Level"]  / (df_model["T4_Level"] + 1e-6)
-
-    # Cumulative risk factor count (0-6)
-    df_model["Risk_count"] = df_model[binary_cols].sum(axis=1)
-
-    # Age × Nodule_Size interaction (large nodule in older patient = higher risk)
-    df_model["Age_Nodule"] = df_model["Age"] * df_model["Nodule_Size"]
-
-    if verbose:
-        print(f"[5b] Feature engineering: added TSH/T3/T4 ratios, "
-              f"Risk_count, Age_Nodule")
-
-    # Step 6: Encode target variable
-    df_model["Diagnosis"] = (df_model["Diagnosis"] == "Malignant").astype(int)
-
-    if verbose:
-        print(f"[6] Encoded target: Benign=0, Malignant=1")
-
-    # Step 7: Separate features and target
-    X             = df_model.drop(columns=["Diagnosis"])
-    y             = df_model["Diagnosis"]
-    feature_names = X.columns.tolist()
-
-    if verbose:
-        print(f"\n[7] Features ({len(feature_names)}): {feature_names}")
-        print(f"    Class balance — "
-              f"Benign: {(y==0).sum():,} ({(y==0).mean()*100:.1f}%)  "
-              f"Malignant: {(y==1).sum():,} ({(y==1).mean()*100:.1f}%)")
-
-    # Step 8: Stratified train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y
-    )
-
-    if verbose:
-        print(f"\n[8] Train/test split (stratified, "
-              f"{int((1-test_size)*100)}/{int(test_size*100)}):")
-        print(f"    Train: {len(X_train):,} rows — "
-              f"Malignant rate: {y_train.mean()*100:.1f}%")
-        print(f"    Test:  {len(X_test):,}  rows — "
-              f"Malignant rate: {y_test.mean()*100:.1f}%")
-
-    # Step 9: StandardScaler on continuous + engineered features
-    scaler        = StandardScaler()
-    cols_to_scale = continuous_cols + engineered_cols
-
-    X_train_sc = X_train.copy()
-    X_test_sc  = X_test.copy()
-    X_train_sc[cols_to_scale] = X_train_sc[cols_to_scale].astype(float)
-    X_test_sc[cols_to_scale]  = X_test_sc[cols_to_scale].astype(float)
-    X_train_sc[cols_to_scale] = scaler.fit_transform(X_train[cols_to_scale])
-    X_test_sc[cols_to_scale]  = scaler.transform(X_test[cols_to_scale])
-
-    if verbose:
-        print(f"\n[9] StandardScaler applied to: {cols_to_scale}")
-        print(f"    (Scaler fitted on training data only — no leakage)")
-        print(f"\nPreprocessing complete. Ready for modelling.")
-
-    return X_train_sc, X_test_sc, y_train, y_test, feature_names
-
-
-# =============================================================================
-# CONFIG
-# =============================================================================
-
-DATA_PATH    = "data/thyroid_cancer_risk_data.csv"
-OUTPUT_DIR   = "outputs/p3"
+    print("XGBoost not installed — skipping XGBoost.")
+DATA_PATH = "data/thyroid_cancer_risk_data.csv"
+OUTPUT_DIR = "outputs/p3"
 RANDOM_STATE = 42
-CV_FOLDS     = 5
-SCORING      = "f1"
-
+CV_FOLDS = 5
+TEST_SIZE = 0.20
+FEATURE_SELECTION_SCORING = "average_precision"
+GRIDSEARCH_SCORING = "average_precision"
+MIN_SELECTION_IMPROVEMENT = 0.001
+MAIN_THRESHOLD_MODE = "f1"          # "f1", "f05", or "min_precision"
+MIN_PRECISION_TARGET = 0.50
+BEST_SELECTION_METRIC = "F1"
+RUN_XGBOOST = True
+RUN_BACKWARD_SELECTION = True
+CONTINUOUS_COLS = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
+BINARY_COLS = [
+    "Family_History", "Radiation_Exposure", "Iodine_Deficiency",
+    "Smoking", "Obesity", "Diabetes",
+]
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-
-# =============================================================================
-# 1. LOAD AND PREPROCESS DATA
-# =============================================================================
-
-print("\n" + "=" * 70)
-print("P3 — MODEL TRAINING AND EVALUATION")
-print("=" * 70)
-
-X_train, X_test, y_train, y_test, feature_names = load_and_preprocess(
-    data_path=DATA_PATH,
-    random_state=RANDOM_STATE,
-    test_size=0.2,
-    verbose=True,
-)
-
-n_benign    = int((y_train == 0).sum())
-n_malignant = int((y_train == 1).sum())
-imbal_ratio = n_benign / n_malignant
-
-print(f"\nClass imbalance (train set):")
-print(f"  Benign:    {n_benign:,}")
-print(f"  Malignant: {n_malignant:,}")
-print(f"  Ratio (neg/pos): {imbal_ratio:.2f}  -> XGBoost scale_pos_weight")
-
-
-# =============================================================================
-# 2. CROSS-VALIDATION STRATEGY
-# =============================================================================
-
-cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
-
-
-# =============================================================================
-# 3. MODEL DEFINITIONS + HYPERPARAMETER GRIDS
-# =============================================================================
-
-# 3A. Logistic Regression (baseline)
-lr_model = LogisticRegression(
-    class_weight="balanced",
-    max_iter=1000,
-    random_state=RANDOM_STATE,
-    solver="lbfgs",
-)
-
-# 3B. Random Forest
-rf_base = RandomForestClassifier(
-    class_weight="balanced",
-    random_state=RANDOM_STATE,
-    n_jobs=-1,
-)
-rf_param_grid = {
-    "n_estimators":      [100, 300],
-    "max_depth":         [None, 10, 20],
-    "min_samples_split": [2, 5],
-    "min_samples_leaf":  [1, 2],
-}
-rf_search = GridSearchCV(
-    estimator=rf_base,
-    param_grid=rf_param_grid,
-    scoring=SCORING,
-    cv=cv,
-    n_jobs=-1,
-    verbose=1,
-    refit=True,
-)
-
-# 3C. XGBoost
-if XGBOOST_AVAILABLE:
-    xgb_base = XGBClassifier(
-        scale_pos_weight=imbal_ratio,
-        eval_metric="logloss",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-        verbosity=0,
-    )
-    xgb_param_grid = {
-        "n_estimators":     [100, 300],
-        "max_depth":        [3, 6],
-        "learning_rate":    [0.05, 0.1],
-        "subsample":        [0.8, 1.0],
-        "colsample_bytree": [0.8, 1.0],
+def title(text: str) -> None:
+    print("\n" + "=" * 80 + f"\n{text}\n" + "=" * 80)
+def subtitle(text: str) -> None:
+    print("\n" + "-" * 80 + f"\n{text}\n" + "-" * 80)
+def save_csv(df: pd.DataFrame, name: str) -> str:
+    path = os.path.join(OUTPUT_DIR, name)
+    df.to_csv(path, index=False)
+    return path
+def cv_score(estimator, X: pd.DataFrame, y: pd.Series, features: List[str], cv, scoring: str) -> Tuple[float, float]:
+    if not features:
+        return np.nan, np.nan
+    scores = cross_val_score(clone(estimator), X[features], y, cv=cv, scoring=scoring, n_jobs=-1)
+    return float(scores.mean()), float(scores.std())
+def cv_probs(model, X, y, cv) -> np.ndarray:
+    return cross_val_predict(model, X, y, cv=cv, method="predict_proba", n_jobs=-1)[:, 1]
+def clean_result_dict(r: Dict) -> Dict:
+    return {k: v for k, v in r.items() if not k.startswith("_")}
+def single_feature_report(X, y, cv, scoring=FEATURE_SELECTION_SCORING) -> pd.DataFrame:
+    rows = []
+    base = LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE)
+    for col in X.columns:
+        ap_mean, ap_std = cv_score(base, X, y, [col], cv, scoring)
+        auc_mean, _ = cv_score(base, X, y, [col], cv, "roc_auc")
+        rows.append({
+            "Feature": col,
+            f"CV {scoring} mean": round(ap_mean, 5),
+            f"CV {scoring} std": round(ap_std, 5),
+            "CV ROC-AUC mean": round(auc_mean, 5),
+            "Random-like flag": bool(abs(auc_mean - 0.5) < 0.03),
+        })
+    return pd.DataFrame(rows).sort_values(f"CV {scoring} mean", ascending=False)
+def forward_selection(X, y, features, estimator, cv, scoring=FEATURE_SELECTION_SCORING) -> Tuple[List[str], pd.DataFrame]:
+    selected, remaining, current = [], list(features), -np.inf
+    rows = []
+    while remaining:
+        trials = []
+        for f in remaining:
+            mean, std = cv_score(estimator, X, y, selected + [f], cv, scoring)
+            trials.append((f, mean, std))
+        best_f, best, std = max(trials, key=lambda x: x[1])
+        improvement = best - current if np.isfinite(current) else best
+        accept = (not np.isfinite(current)) or improvement >= MIN_SELECTION_IMPROVEMENT
+        rows.append({
+            "Step": len(rows) + 1, "Action": "add" if accept else "stop", "Feature": best_f,
+            "Selected features after step": selected + [best_f] if accept else selected,
+            f"CV {scoring} mean": round(best, 5), f"CV {scoring} std": round(std, 5),
+            "Improvement": round(float(improvement), 5), "Accepted": bool(accept),
+        })
+        if not accept:
+            break
+        selected.append(best_f)
+        remaining.remove(best_f)
+        current = best
+    return selected, pd.DataFrame(rows)
+def backward_elimination(X, y, features, estimator, cv, scoring=FEATURE_SELECTION_SCORING) -> Tuple[List[str], pd.DataFrame]:
+    selected = list(features)
+    current, std = cv_score(estimator, X, y, selected, cv, scoring)
+    rows = [{
+        "Step": 0, "Action": "start", "Removed feature": "",
+        "Remaining features after step": selected.copy(),
+        f"CV {scoring} mean": round(current, 5), f"CV {scoring} std": round(std, 5),
+        "Score change": 0.0, "Accepted": True,
+    }]
+    while len(selected) > 1:
+        trials = []
+        for f in selected:
+            trial = [x for x in selected if x != f]
+            mean, std = cv_score(estimator, X, y, trial, cv, scoring)
+            trials.append((f, mean, std, trial))
+        removed, best, std, best_features = max(trials, key=lambda x: x[1])
+        change = best - current
+        accept = change >= -MIN_SELECTION_IMPROVEMENT
+        rows.append({
+            "Step": len(rows), "Action": "remove" if accept else "stop", "Removed feature": removed,
+            "Remaining features after step": best_features if accept else selected.copy(),
+            f"CV {scoring} mean": round(best, 5), f"CV {scoring} std": round(std, 5),
+            "Score change": round(float(change), 5), "Accepted": bool(accept),
+        })
+        if not accept:
+            break
+        selected, current = best_features, best
+    return selected, pd.DataFrame(rows)
+def compare_feature_sets(X, y, full, forward, backward, estimator, cv, scoring) -> Tuple[str, List[str], pd.DataFrame]:
+    candidates = {
+        "Full retained features": list(full),
+        "Forward-selected features": list(forward),
+        "Backward-selected features": list(backward),
     }
-    xgb_search = GridSearchCV(
-        estimator=xgb_base,
-        param_grid=xgb_param_grid,
-        scoring=SCORING,
-        cv=cv,
-        n_jobs=-1,
-        verbose=1,
-        refit=True,
-    )
-
-
-# =============================================================================
-# 4. TRAINING
-# =============================================================================
-
-print("\n" + "-" * 70)
-print("Training Logistic Regression (baseline)...")
-lr_model.fit(X_train, y_train)
-print("  Done.")
-
-print("\nTraining Random Forest with GridSearchCV...")
-rf_search.fit(X_train, y_train)
-print(f"  Best params : {rf_search.best_params_}")
-print(f"  Best CV F1  : {rf_search.best_score_:.4f}")
-
-if XGBOOST_AVAILABLE:
-    print("\nTraining XGBoost with GridSearchCV...")
-    xgb_search.fit(X_train, y_train)
-    print(f"  Best params : {xgb_search.best_params_}")
-    print(f"  Best CV F1  : {xgb_search.best_score_:.4f}")
-
-
-# =============================================================================
-# 4B. THRESHOLD OPTIMIZATION
-# =============================================================================
-# The default predict() uses threshold = 0.5, which is rarely optimal under
-# class imbalance combined with class_weight='balanced'. We find the threshold
-# that maximises F1 on TRAINING data using cross-validated probabilities
-# (so the threshold itself doesn't overfit), then apply that single threshold
-# to the held-out test set. The test set is still seen only once.
-
-def find_best_threshold(model, X, y, cv):
-    """
-    Find the classification threshold that maximises F1.
-
-    Uses cross_val_predict to get out-of-fold probabilities, so the chosen
-    threshold generalises rather than overfitting the training data.
-    """
-    probs = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
-    prec, rec, thr = precision_recall_curve(y, probs)
-    f1s = 2 * prec * rec / (prec + rec + 1e-9)
-    best_idx = f1s[:-1].argmax()
-    return float(thr[best_idx]), float(f1s[best_idx])
-
-
-print("\n" + "-" * 70)
-print("Optimising classification thresholds (CV on training data)...")
-
-models_to_tune = [
-    ("Logistic Regression", lr_model),
-    ("Random Forest",       rf_search.best_estimator_),
-]
-if XGBOOST_AVAILABLE:
-    models_to_tune.append(("XGBoost", xgb_search.best_estimator_))
-
-best_thresholds = {}
-for name, model in models_to_tune:
-    thr, f1_cv = find_best_threshold(model, X_train, y_train, cv)
-    best_thresholds[name] = thr
-    print(f"  {name:22s}  best threshold = {thr:.3f}  (CV F1 = {f1_cv:.4f})")
-
-
-# =============================================================================
-# 4C. CLASS WEIGHT SENSITIVITY ANALYSIS
-# =============================================================================
-# class_weight='balanced' is just one choice — sklearn computes weights
-# inversely proportional to class frequency. We sweep a range of explicit
-# weight ratios to see whether a different cost-sensitive setting changes
-# the precision/recall trade-off in a meaningful way.
-#
-# For each weight setting:
-#   1. Train the model with that weight
-#   2. Find F1-optimal threshold via cross-validated probabilities
-#   3. Evaluate on test set with that threshold
-#
-# Logistic Regression is used here because it's fast and the trends
-# transfer to RF/XGBoost (boosting/bagging react similarly to class weights).
-
-print("\n" + "-" * 70)
-print("Class weight sensitivity analysis (Logistic Regression)...")
-print("-" * 70)
-
-weight_settings = [
-    ("None (1:1)",       {0: 1, 1: 1}),
-    ("Mild (1:2)",       {0: 1, 1: 2}),
-    ("Moderate (1:3)",   {0: 1, 1: 3}),
-    ("Balanced (auto)",  "balanced"),
-    ("Strong (1:5)",     {0: 1, 1: 5}),
-    ("Aggressive (1:7)", {0: 1, 1: 7}),
-]
-
-cw_results = []
-for label, weight in weight_settings:
-    lr_cw = LogisticRegression(
-        class_weight=weight,
-        max_iter=1000,
-        random_state=RANDOM_STATE,
-        solver="lbfgs",
-    )
-    lr_cw.fit(X_train, y_train)
-
-    thr, f1_cv = find_best_threshold(lr_cw, X_train, y_train, cv)
-
-    y_proba = lr_cw.predict_proba(X_test)[:, 1]
-    y_pred  = (y_proba >= thr).astype(int)
-
-    cw_results.append({
-        "Weight setting": label,
-        "Threshold":      round(thr, 3),
-        "F1":             round(f1_score(y_test, y_pred), 4),
-        "Precision":      round(precision_score(y_test, y_pred), 4),
-        "Recall":         round(recall_score(y_test, y_pred), 4),
-        "Accuracy":       round(accuracy_score(y_test, y_pred), 4),
-        "ROC-AUC":        round(roc_auc_score(y_test, y_proba), 4),
-    })
-
-cw_df = pd.DataFrame(cw_results).set_index("Weight setting")
-print("\nClass weight sensitivity results:")
-print(cw_df.to_string())
-
-_cw_path = os.path.join(OUTPUT_DIR, "class_weight_sensitivity.csv")
-cw_df.to_csv(_cw_path)
-print(f"\nSaved: {_cw_path}")
-
-# Plot: how Precision/Recall/F1 change with class weight
-fig, ax = plt.subplots(figsize=(10, 5))
-labels = cw_df.index.tolist()
-x      = np.arange(len(labels))
-width  = 0.25
-
-ax.bar(x - width, cw_df["Precision"], width, label="Precision",
-       color="#4C72B0", alpha=0.85)
-ax.bar(x,         cw_df["Recall"],    width, label="Recall",
-       color="#55A868", alpha=0.85)
-ax.bar(x + width, cw_df["F1"],        width, label="F1",
-       color="#C44E52", alpha=0.85)
-
-for i, val in enumerate(cw_df["F1"]):
-    ax.text(i + width, val + 0.01, f"{val:.3f}",
-            ha="center", fontsize=8, fontweight="bold")
-
-ax.set_xticks(x)
-ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
-ax.set_ylim(0, 1.05)
-ax.set_ylabel("Score", fontsize=12)
-ax.set_title("Class Weight Sensitivity (Logistic Regression, threshold-tuned)",
-             fontsize=13)
-ax.legend(loc="upper right", fontsize=10)
-ax.grid(axis="y", alpha=0.3)
-fig.tight_layout()
-_cw_plot_path = os.path.join(OUTPUT_DIR, "class_weight_sensitivity.png")
-fig.savefig(_cw_plot_path, dpi=150)
-plt.close(fig)
-print(f"Saved: {_cw_plot_path}")
-
-
-# =============================================================================
-# 4D. NAIVE BASELINES
-# =============================================================================
-# Dummy classifiers establish a lower bound for performance:
-#   - "most_frequent" always predicts the majority class (Benign)
-#   - "stratified"    predicts randomly according to class distribution
-# Our models should clearly outperform both. This proves they actually learn
-# from the features rather than just exploiting class imbalance.
-
-print("\n" + "-" * 70)
-print("Naive baselines (lower bound for model comparison)...")
-print("-" * 70)
-
-baseline_results = []
-baselines = [
-    ("Dummy (Majority)",   DummyClassifier(strategy="most_frequent",
-                                            random_state=RANDOM_STATE)),
-    ("Dummy (Stratified)", DummyClassifier(strategy="stratified",
-                                            random_state=RANDOM_STATE)),
-]
-
-for name, baseline in baselines:
-    baseline.fit(X_train, y_train)
-    y_pred  = baseline.predict(X_test)
-    y_proba = baseline.predict_proba(X_test)[:, 1]
-
-    baseline_results.append({
-        "Model":     name,
-        "F1":        round(f1_score(y_test, y_pred, zero_division=0), 4),
-        "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
-        "Recall":    round(recall_score(y_test, y_pred, zero_division=0), 4),
-        "Accuracy":  round(accuracy_score(y_test, y_pred), 4),
-        "ROC-AUC":   round(roc_auc_score(y_test, y_proba), 4),
-    })
-
-baseline_df = pd.DataFrame(baseline_results).set_index("Model")
-print("\nBaseline performance:")
-print(baseline_df.to_string())
-
-_baseline_path = os.path.join(OUTPUT_DIR, "baseline_comparison.csv")
-baseline_df.to_csv(_baseline_path)
-print(f"\nSaved: {_baseline_path}")
-
-
-# =============================================================================
-# 5. EVALUATION
-# =============================================================================
-
-def evaluate(name, model, X, y, threshold=0.5):
-    """Return a dict of test-set metrics plus raw predictions."""
-    y_proba = model.predict_proba(X)[:, 1]
-    y_pred  = (y_proba >= threshold).astype(int)
+    rows = []
+    for name, feats in candidates.items():
+        mean, std = cv_score(estimator, X, y, feats, cv, scoring)
+        rows.append({
+            "Feature set": name, "n_features": len(feats), "Features": feats,
+            f"CV {scoring} mean": round(mean, 5), f"CV {scoring} std": round(std, 5),
+        })
+    df = pd.DataFrame(rows).sort_values(f"CV {scoring} mean", ascending=False)
+    return str(df.iloc[0]["Feature set"]), list(df.iloc[0]["Features"]), df
+def ablation_study(X, y, cv, scoring=FEATURE_SELECTION_SCORING) -> pd.DataFrame:
+    sets = {
+        "Clinical continuous only": [c for c in CONTINUOUS_COLS if c in X.columns],
+        "Binary risk factors + Gender": [c for c in BINARY_COLS + ["Gender"] if c in X.columns],
+        "All retained features": list(X.columns),
+    }
+    est = LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE)
+    rows = []
+    for name, feats in sets.items():
+        ap, ap_std = cv_score(est, X, y, feats, cv, scoring)
+        auc, auc_std = cv_score(est, X, y, feats, cv, "roc_auc")
+        rows.append({
+            "Feature set": name, "n_features": len(feats), "Features": feats,
+            f"CV {scoring} mean": round(ap, 5), f"CV {scoring} std": round(ap_std, 5),
+            "CV ROC-AUC mean": round(auc, 5), "CV ROC-AUC std": round(auc_std, 5),
+        })
+    return pd.DataFrame(rows).sort_values(f"CV {scoring} mean", ascending=False)
+def threshold_f1(probs, y):
+    p, r, t = precision_recall_curve(y, probs)
+    p, r = p[:-1], r[:-1]
+    f1 = 2 * p * r / (p + r + 1e-9)
+    i = int(np.argmax(f1))
+    return float(t[i]), float(f1[i]), float(p[i]), float(r[i])
+def threshold_fbeta(probs, y, beta=0.5):
+    p, r, t = precision_recall_curve(y, probs)
+    p, r = p[:-1], r[:-1]
+    b2 = beta ** 2
+    fb = (1 + b2) * p * r / (b2 * p + r + 1e-9)
+    i = int(np.argmax(fb))
+    return float(t[i]), float(fb[i]), float(p[i]), float(r[i])
+def threshold_min_precision(probs, y, target=0.50):
+    p, r, t = precision_recall_curve(y, probs)
+    p, r = p[:-1], r[:-1]
+    valid = np.where(p >= target)[0]
+    if len(valid) == 0:
+        return None, None, None, None
+    i = int(valid[np.argmax(r[valid])])
+    f1 = 2 * p[i] * r[i] / (p[i] + r[i] + 1e-9)
+    return float(t[i]), float(f1), float(p[i]), float(r[i])
+def choose_threshold(probs, y, mode="f1", min_precision=0.50) -> Dict:
+    if mode == "f1":
+        thr, score, p, r = threshold_f1(probs, y)
+        return {"mode": "f1", "label": "F1-optimal (screening)", "threshold": thr, "score": score, "cv_precision": p, "cv_recall": r, "note": ""}
+    if mode == "f05":
+        thr, score, p, r = threshold_fbeta(probs, y, beta=0.5)
+        return {"mode": "f05", "label": "F0.5-optimal (precision-leaning)", "threshold": thr, "score": score, "cv_precision": p, "cv_recall": r, "note": ""}
+    if mode == "min_precision":
+        thr, score, p, r = threshold_min_precision(probs, y, min_precision)
+        if thr is None:
+            thr, score, p, r = threshold_fbeta(probs, y, beta=0.5)
+            note = f"Precision target {min_precision:.2f} unreachable on CV; used F0.5 fallback."
+            return {"mode": "min_precision_fallback_f05", "label": f"Min-precision>={min_precision:.2f} unreachable; fallback F0.5", "threshold": thr, "score": score, "cv_precision": p, "cv_recall": r, "note": note}
+        return {"mode": "min_precision", "label": f"Min-precision>={min_precision:.2f}", "threshold": thr, "score": score, "cv_precision": p, "cv_recall": r, "note": ""}
+    raise ValueError("mode must be 'f1', 'f05', or 'min_precision'")
+def strategies(model, X, y, cv) -> List[Dict]:
+    probs = cv_probs(model, X, y, cv)
+    return [choose_threshold(probs, y, m, MIN_PRECISION_TARGET) for m in ["f1", "f05", "min_precision"]]
+def evaluate(name, model, X_test, y_test, strategy: Dict) -> Dict:
+    proba = model.predict_proba(X_test)[:, 1]
+    pred = (proba >= strategy["threshold"]).astype(int)
     return {
-        "Model":     name,
-        "Threshold": round(float(threshold), 3),
-        "ROC-AUC":   roc_auc_score(y, y_proba),
-        "F1":        f1_score(y, y_pred),
-        "Precision": precision_score(y, y_pred),
-        "Recall":    recall_score(y, y_pred),
-        "Accuracy":  accuracy_score(y, y_pred),
-        "_y_pred":   y_pred,
-        "_y_proba":  y_proba,
+        "Model": name, "Strategy": strategy["label"], "Mode": strategy["mode"],
+        "Threshold": round(float(strategy["threshold"]), 3),
+        "CV Precision": round(float(strategy["cv_precision"]), 4),
+        "CV Recall": round(float(strategy["cv_recall"]), 4),
+        "F1": round(f1_score(y_test, pred, zero_division=0), 4),
+        "Precision": round(precision_score(y_test, pred, zero_division=0), 4),
+        "Recall": round(recall_score(y_test, pred, zero_division=0), 4),
+        "Accuracy": round(accuracy_score(y_test, pred), 4),
+        "ROC-AUC": round(roc_auc_score(y_test, proba), 4),
+        "Average Precision": round(average_precision_score(y_test, proba), 4),
+        "Note": strategy["note"], "_y_pred": pred, "_y_proba": proba,
     }
-
-
-results = [
-    evaluate("Logistic Regression", lr_model,
-             X_test, y_test, threshold=best_thresholds["Logistic Regression"]),
-    evaluate("Random Forest",       rf_search.best_estimator_,
-             X_test, y_test, threshold=best_thresholds["Random Forest"]),
-]
-if XGBOOST_AVAILABLE:
-    results.append(evaluate("XGBoost", xgb_search.best_estimator_,
-                            X_test, y_test, threshold=best_thresholds["XGBoost"]))
-
-metrics_df = pd.DataFrame(
-    [{k: v for k, v in r.items() if not k.startswith("_")} for r in results]
-).set_index("Model")
-
-print("\n" + "=" * 70)
-print("MODEL COMPARISON TABLE (test set, with tuned thresholds)")
-print("=" * 70)
-print(metrics_df.round(4).to_string())
-
-# Combined comparison: models vs baselines (for the report)
-combined_df = pd.concat([
-    metrics_df[["F1", "Precision", "Recall", "Accuracy", "ROC-AUC"]],
-    baseline_df[["F1", "Precision", "Recall", "Accuracy", "ROC-AUC"]],
-])
-print("\n" + "=" * 70)
-print("MODELS vs BASELINES (test set)")
-print("=" * 70)
-print(combined_df.round(4).to_string())
-
-_combined_path = os.path.join(OUTPUT_DIR, "models_vs_baselines.csv")
-combined_df.to_csv(_combined_path)
-print(f"\nSaved: {_combined_path}")
-
-
-# =============================================================================
-# 6. IDENTIFY BEST MODEL
-# =============================================================================
-
-best_name = metrics_df["F1"].idxmax()
-best_f1   = metrics_df.loc[best_name, "F1"]
-best_auc  = metrics_df.loc[best_name, "ROC-AUC"]
-best_thr  = metrics_df.loc[best_name, "Threshold"]
-
-print(f"\n{'=' * 70}")
-print(f"BEST MODEL: {best_name}")
-print(f"  F1        = {best_f1:.4f}")
-print(f"  ROC-AUC   = {best_auc:.4f}")
-print(f"  Threshold = {best_thr:.3f}")
-print(f"  -> P4 will run forward/backward selection and clustering on this model.")
-print(f"{'=' * 70}")
-
-_model_map = {
-    "Logistic Regression": lr_model,
-    "Random Forest":       rf_search.best_estimator_,
-}
-if XGBOOST_AVAILABLE:
-    _model_map["XGBoost"] = xgb_search.best_estimator_
-
-best_model = _model_map[best_name]
-
-
-# =============================================================================
-# 7. PLOTS
-# =============================================================================
-
-COLORS = ["#4C72B0", "#55A868", "#C44E52"]
-
-# 7A. ROC Curves
-fig, ax = plt.subplots(figsize=(7, 6))
-for i, r in enumerate(results):
-    fpr, tpr, _ = roc_curve(y_test, r["_y_proba"])
-    ax.plot(fpr, tpr, color=COLORS[i], lw=2,
-            label=f"{r['Model']} (AUC = {r['ROC-AUC']:.3f})")
-ax.plot([0, 1], [0, 1], "k--", lw=1, label="Random classifier")
-ax.set_xlabel("False Positive Rate", fontsize=12)
-ax.set_ylabel("True Positive Rate", fontsize=12)
-ax.set_title("ROC Curves — Thyroid Cancer Diagnosis", fontsize=13)
-ax.legend(loc="lower right", fontsize=10)
-ax.grid(alpha=0.3)
-fig.tight_layout()
-_roc_path = os.path.join(OUTPUT_DIR, "roc_curves.png")
-fig.savefig(_roc_path, dpi=150)
-plt.close(fig)
-print(f"\nSaved: {_roc_path}")
-
-# 7B. Confusion Matrices
-ncols = len(results)
-fig, axes = plt.subplots(1, ncols, figsize=(5 * ncols, 4))
-if ncols == 1:
-    axes = [axes]
-for i, r in enumerate(results):
-    cm   = confusion_matrix(y_test, r["_y_pred"])
-    disp = ConfusionMatrixDisplay(cm, display_labels=["Benign", "Malignant"])
-    disp.plot(ax=axes[i], colorbar=False, cmap="Blues")
-    axes[i].set_title(f"{r['Model']}\n(threshold = {r['Threshold']:.2f})",
-                      fontsize=11)
-fig.suptitle("Confusion Matrices (test set, tuned thresholds)",
-             fontsize=13, y=1.02)
-fig.tight_layout()
-_cm_path = os.path.join(OUTPUT_DIR, "confusion_matrices.png")
-fig.savefig(_cm_path, dpi=150, bbox_inches="tight")
-plt.close(fig)
-print(f"Saved: {_cm_path}")
-
-# 7C. Metric Bar Chart (models + baselines)
-metric_cols = ["ROC-AUC", "F1", "Precision", "Recall", "Accuracy"]
-all_labels  = [r["Model"] for r in results] + [b["Model"] for b in baseline_results]
-all_values  = [[r[m] for m in metric_cols] for r in results] + \
-              [[b[m] for m in metric_cols] for b in baseline_results]
-all_colors  = COLORS[:len(results)] + ["#999999", "#CCCCCC"]
-
-x     = np.arange(len(metric_cols))
-width = 0.8 / len(all_labels)
-
-fig, ax = plt.subplots(figsize=(13, 5))
-for i, (label, vals, color) in enumerate(zip(all_labels, all_values, all_colors)):
-    offset = (i - len(all_labels) / 2 + 0.5) * width
-    bars = ax.bar(x + offset, vals, width, label=label, color=color, alpha=0.85)
-    for bar, val in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f"{val:.2f}", ha="center", fontsize=7)
-ax.set_xticks(x)
-ax.set_xticklabels(metric_cols, fontsize=11)
-ax.set_ylim(0, 1.08)
-ax.set_ylabel("Score", fontsize=12)
-ax.set_title("Model Performance vs Naive Baselines (test set, tuned thresholds)",
-             fontsize=13)
-ax.legend(fontsize=9, ncol=2)
-ax.axhline(0.5, color="grey", lw=0.8, linestyle="--", alpha=0.5)
-ax.grid(axis="y", alpha=0.3)
-fig.tight_layout()
-_bar_path = os.path.join(OUTPUT_DIR, "metric_comparison.png")
-fig.savefig(_bar_path, dpi=150)
-plt.close(fig)
-print(f"Saved: {_bar_path}")
-
-# 7D. Precision-Recall Trade-off
-fig, ax = plt.subplots(figsize=(7, 6))
-for i, r in enumerate(results):
-    prec, rec, thr = precision_recall_curve(y_test, r["_y_proba"])
-    ax.plot(rec, prec, color=COLORS[i], lw=2,
-            label=f"{r['Model']} (F1 = {r['F1']:.3f})")
-    chosen_thr = r["Threshold"]
-    idx = np.argmin(np.abs(thr - chosen_thr))
-    ax.scatter(rec[idx], prec[idx], color=COLORS[i],
-               s=100, zorder=5, edgecolor="black", linewidth=1.5)
-
-baseline_prec = y_test.mean()
-ax.axhline(baseline_prec, color="grey", lw=0.8, linestyle="--", alpha=0.5,
-           label=f"Random classifier (P = {baseline_prec:.2f})")
-
-ax.set_xlabel("Recall", fontsize=12)
-ax.set_ylabel("Precision", fontsize=12)
-ax.set_title("Precision-Recall Trade-off (markers = F1-optimal thresholds)",
-             fontsize=13)
-ax.legend(loc="upper right", fontsize=10)
-ax.grid(alpha=0.3)
-ax.set_xlim(0, 1)
-ax.set_ylim(0, 1)
-fig.tight_layout()
-_pr_path = os.path.join(OUTPUT_DIR, "precision_recall_curves.png")
-fig.savefig(_pr_path, dpi=150)
-plt.close(fig)
-print(f"Saved: {_pr_path}")
-
-
-# =============================================================================
-# 8. SAVE BEST MODEL + METADATA FOR P4
-# =============================================================================
-
-_model_path = os.path.join(OUTPUT_DIR, "best_model.joblib")
-joblib.dump(best_model, _model_path)
-print(f"\nSaved best model ({best_name}): {_model_path}")
-
-metrics_df.round(4).to_csv(os.path.join(OUTPUT_DIR, "model_comparison.csv"))
-print(f"Saved comparison table: {OUTPUT_DIR}/model_comparison.csv")
-
-_meta = {
-    "name":          best_name,
-    "f1":            round(float(best_f1),  4),
-    "roc_auc":       round(float(best_auc), 4),
-    "threshold":     round(float(best_thr), 3),
-    "model_path":    _model_path,
-    "feature_names": feature_names,
-}
-_meta_path = os.path.join(OUTPUT_DIR, "best_model_meta.json")
-with open(_meta_path, "w") as fh:
-    json.dump(_meta, fh, indent=2)
-print(f"Saved model metadata:   {_meta_path}")
-
-
-# =============================================================================
-# 9. PUBLIC API FOR P4
-# =============================================================================
-
-def get_best_model():
-    """
-    Return the best-performing model for use by P4.
-
-    Returns
-    -------
-    model_name    : str       — human-readable model name
-    model         : fitted    — sklearn / xgboost estimator (already fitted)
-    feature_names : list[str] — feature names used during training
-    threshold     : float     — F1-optimal classification threshold
-    """
-    return best_name, best_model, feature_names, best_thr
-
-
-print("\n" + "=" * 70)
-print("P3 complete.")
-print("=" * 70)
+def baseline_results(X_train, y_train, X_test, y_test) -> List[Dict]:
+    rows = []
+    for name, strategy in [("Dummy (Majority)", "most_frequent"), ("Dummy (Stratified)", "stratified")]:
+        model = DummyClassifier(strategy=strategy, random_state=RANDOM_STATE).fit(X_train, y_train)
+        pred = model.predict(X_test)
+        proba = model.predict_proba(X_test)[:, 1]
+        rows.append({
+            "Model": name, "Strategy": strategy, "Mode": "naive", "Threshold": np.nan,
+            "CV Precision": np.nan, "CV Recall": np.nan,
+            "F1": round(f1_score(y_test, pred, zero_division=0), 4),
+            "Precision": round(precision_score(y_test, pred, zero_division=0), 4),
+            "Recall": round(recall_score(y_test, pred, zero_division=0), 4),
+            "Accuracy": round(accuracy_score(y_test, pred), 4),
+            "ROC-AUC": round(roc_auc_score(y_test, proba), 4),
+            "Average Precision": round(average_precision_score(y_test, proba), 4),
+            "Note": "", "_y_pred": pred, "_y_proba": proba,
+        })
+    return rows
+def barh_plot(df, score_col, std_col, label_col, title_text, xlabel, path):
+    d = df.copy().sort_values(score_col, ascending=True)
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    y = np.arange(len(d))
+    ax.barh(y, d[score_col], xerr=d[std_col], alpha=0.85)
+    ax.set_yticks(y); ax.set_yticklabels(d[label_col])
+    ax.set_xlabel(xlabel); ax.set_title(title_text); ax.grid(axis="x", alpha=0.3)
+    for i, val in enumerate(d[score_col]):
+        ax.text(val + 0.002, i, f"{val:.3f}", va="center", fontsize=9)
+    fig.tight_layout(); fig.savefig(path, dpi=150); plt.close(fig)
+def plot_confusion(results, y_test, filename, suptitle):
+    fig, axes = plt.subplots(1, len(results), figsize=(5 * len(results), 4))
+    if len(results) == 1:
+        axes = [axes]
+    for ax, r in zip(axes, results):
+        ConfusionMatrixDisplay(confusion_matrix(y_test, r["_y_pred"]), display_labels=["Benign", "Malignant"]).plot(ax=ax, colorbar=False, cmap="Blues")
+        ax.set_title(f"{r['Model']}\n{r['Strategy']}\nthr={r['Threshold']:.2f}, P={r['Precision']:.2f}, R={r['Recall']:.2f}, F1={r['F1']:.2f}", fontsize=9)
+    fig.suptitle(suptitle, fontsize=13, y=1.05)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, filename), dpi=150, bbox_inches="tight"); plt.close(fig)
+def make_plots(models, main_results, all_results, baselines, best_name, best_model, best_results, X_test, y_test, selected_features):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for r in main_results:
+        fpr, tpr, _ = roc_curve(y_test, r["_y_proba"])
+        ax.plot(fpr, tpr, lw=2, label=f"{r['Model']} (AUC = {r['ROC-AUC']:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", lw=1, label="Random classifier")
+    ax.set(xlabel="False Positive Rate", ylabel="True Positive Rate", title="ROC Curves — Thyroid Cancer Diagnosis")
+    ax.legend(loc="lower right"); ax.grid(alpha=0.3)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "roc_curves.png"), dpi=150); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for r in main_results:
+        p, rec, _ = precision_recall_curve(y_test, r["_y_proba"])
+        ax.plot(rec, p, lw=2, label=r["Model"])
+    for marker, r in zip(["o", "s", "^"], best_results):
+        ax.scatter(r["Recall"], r["Precision"], s=90, marker=marker, edgecolor="black", label=f"{best_name} — {r['Strategy']}")
+    ax.axhline(y_test.mean(), ls="--", lw=1, label=f"Random baseline precision = {y_test.mean():.2f}")
+    ax.set(xlabel="Recall", ylabel="Precision", title="Precision-Recall Trade-off and Threshold Strategies")
+    ax.set_ylim(0, 1); ax.legend(fontsize=9); ax.grid(alpha=0.3)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "precision_recall_curves.png"), dpi=150); plt.close(fig)
+    plot_confusion(main_results, y_test, "confusion_matrices_models.png", f"Confusion Matrices — model comparison, threshold mode: {MAIN_THRESHOLD_MODE}")
+    plot_confusion(best_results, y_test, "confusion_matrices_best_model_strategies.png", f"Confusion Matrices — {best_name} under threshold strategies")
+    metrics = ["ROC-AUC", "Average Precision", "F1", "Precision", "Recall", "Accuracy"]
+    labels = [r["Model"] for r in main_results] + [b["Model"] for b in baselines]
+    vals = [[r[m] for m in metrics] for r in main_results] + [[b[m] for m in metrics] for b in baselines]
+    x = np.arange(len(metrics)); width = 0.8 / len(labels)
+    fig, ax = plt.subplots(figsize=(14, 5.5))
+    for i, (lab, v) in enumerate(zip(labels, vals)):
+        bars = ax.bar(x + (i - len(labels) / 2 + 0.5) * width, v, width, label=lab, alpha=0.85)
+        for b, val in zip(bars, v):
+            ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.01, f"{val:.2f}", ha="center", fontsize=8)
+    ax.axhline(0.5, ls="--", lw=1, alpha=0.5)
+    ax.set_xticks(x); ax.set_xticklabels(metrics); ax.set_ylabel("Score")
+    ax.set_title(f"Model Performance vs Naive Baselines — threshold mode: {MAIN_THRESHOLD_MODE}")
+    ax.legend(ncol=2); ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "metric_comparison.png"), dpi=150); plt.close(fig)
+    proba = best_model.predict_proba(X_test[selected_features])[:, 1]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(proba[y_test == 0], bins=40, density=True, alpha=0.55, label="Benign")
+    ax.hist(proba[y_test == 1], bins=40, density=True, alpha=0.55, label="Malignant")
+    ax.set(xlabel="Predicted probability of malignant", ylabel="Density", title=f"Probability overlap — {best_name}")
+    ax.legend(); ax.grid(alpha=0.3)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "probability_overlap_best_model.png"), dpi=150); plt.close(fig)
+    importance = getattr(best_model, "feature_importances_", None)
+    if importance is None and hasattr(best_model, "coef_"):
+        importance = np.abs(best_model.coef_[0])
+    if importance is not None:
+        imp = pd.DataFrame({"Feature": selected_features, "Importance": importance}).sort_values("Importance")
+        fig, ax = plt.subplots(figsize=(8, max(4, 0.35 * len(imp))))
+        ax.barh(imp["Feature"], imp["Importance"], alpha=0.85)
+        ax.set_xlabel("Importance" if hasattr(best_model, "feature_importances_") else "|Coefficient|")
+        ax.set_title(f"Feature importance — {best_name}"); ax.grid(axis="x", alpha=0.3)
+        fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "feature_importance_best_model.png"), dpi=150); plt.close(fig)
+    p, rec, thr = precision_recall_curve(y_test, proba)
+    p, rec = p[:-1], rec[:-1]
+    f1 = 2 * p * rec / (p + rec + 1e-9)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(thr, p, label="Precision"); ax.plot(thr, rec, label="Recall"); ax.plot(thr, f1, label="F1")
+    for r in best_results:
+        ax.axvline(r["Threshold"], ls="--", alpha=0.7, label=f"{r['Strategy']} thr={r['Threshold']:.2f}")
+    ax.set(xlabel="Threshold", ylabel="Score", title=f"Threshold Diagnostics — {best_name}")
+    ax.set_ylim(0, 1.05); ax.legend(fontsize=8); ax.grid(alpha=0.3)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "threshold_diagnostics_best_model.png"), dpi=150); plt.close(fig)
+def class_weight_sensitivity(X_train, y_train, X_test, y_test, cv):
+    configs = [("None (1:1)", None), ("Mild (1:2)", {0: 1, 1: 2}), ("Moderate (1:3)", {0: 1, 1: 3}), ("Balanced (auto)", "balanced"), ("Strong (1:5)", {0: 1, 1: 5}), ("Aggressive (1:7)", {0: 1, 1: 7})]
+    fixed, tuned = [], []
+    for label, weight in configs:
+        model = LogisticRegression(class_weight=weight, max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE)
+        model.fit(X_train, y_train)
+        proba = model.predict_proba(X_test)[:, 1]
+        pred = (proba >= 0.5).astype(int)
+        fixed.append((label, precision_score(y_test, pred, zero_division=0), recall_score(y_test, pred, zero_division=0), f1_score(y_test, pred, zero_division=0)))
+        strat = choose_threshold(cv_probs(model, X_train, y_train, cv), y_train, "f1")
+        pred = (proba >= strat["threshold"]).astype(int)
+        tuned.append((label, precision_score(y_test, pred, zero_division=0), recall_score(y_test, pred, zero_division=0), f1_score(y_test, pred, zero_division=0)))
+    rows = []
+    for mode, data in [("fixed_0.5", fixed), ("f1_tuned", tuned)]:
+        for label, p, r, f in data:
+            rows.append({"Mode": mode, "Class weight": label, "Precision": p, "Recall": r, "F1": f})
+    df = pd.DataFrame(rows)
+    save_csv(df, "class_weight_sensitivity.csv")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), sharey=True)
+    for ax, data, title_text in zip(axes, [fixed, tuned], ["Fixed threshold = 0.5", "F1-tuned threshold"]):
+        labels = [x[0] for x in data]; x = np.arange(len(labels)); width = 0.25
+        for i, metric in enumerate(["Precision", "Recall", "F1"]):
+            vals = [row[i + 1] for row in data]
+            bars = ax.bar(x + (i - 1) * width, vals, width, label=metric, alpha=0.85)
+            if metric == "F1":
+                for b, val in zip(bars, vals):
+                    ax.text(b.get_x() + b.get_width()/2, val + 0.01, f"{val:.3f}", ha="center", fontsize=8, fontweight="bold")
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=20, ha="right")
+        ax.set_title(title_text); ax.grid(axis="y", alpha=0.3)
+    axes[0].set_ylabel("Score"); axes[1].legend()
+    fig.suptitle("Class-weight sensitivity: threshold retuning can neutralise class_weight effects", y=1.03)
+    fig.tight_layout(); fig.savefig(os.path.join(OUTPUT_DIR, "class_weight_sensitivity.png"), dpi=150, bbox_inches="tight"); plt.close(fig)
+    return df
+def main() -> None:
+    title("P3 — MODEL TRAINING AND EVALUATION")
+    result = load_and_preprocess(DATA_PATH, random_state=RANDOM_STATE, test_size=TEST_SIZE, verbose=True)
+    if len(result) == 6:
+        X_train, X_test, y_train, y_test, feature_names, scaler = result
+    else:
+        X_train, X_test, y_train, y_test, feature_names = result
+        scaler = None
+    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    n_benign, n_malignant = int((y_train == 0).sum()), int((y_train == 1).sum())
+    imbal_ratio = n_benign / max(n_malignant, 1)
+    print(f"\nClass imbalance — Benign: {n_benign:,}, Malignant: {n_malignant:,}, ratio neg/pos: {imbal_ratio:.2f}")
+    selector = LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE)
+    subtitle("Single-feature signal report")
+    signal_df = single_feature_report(X_train, y_train, cv)
+    print(signal_df.to_string(index=False)); save_csv(signal_df, "single_feature_signal_report.csv")
+    subtitle("Forward/backward feature selection")
+    forward_features, forward_df = forward_selection(X_train, y_train, feature_names, selector, cv)
+    backward_features, backward_df = (backward_elimination(X_train, y_train, feature_names, selector, cv) if RUN_BACKWARD_SELECTION else (feature_names, pd.DataFrame()))
+    save_csv(forward_df, "forward_feature_selection.csv"); save_csv(backward_df, "backward_feature_elimination.csv")
+    selected_set, selected_features, feature_df = compare_feature_sets(X_train, y_train, feature_names, forward_features, backward_features, selector, cv, FEATURE_SELECTION_SCORING)
+    print(feature_df.to_string(index=False)); print(f"\nChosen: {selected_set} — {len(selected_features)} features")
+    save_csv(feature_df, "feature_set_comparison.csv")
+    barh_plot(feature_df, f"CV {FEATURE_SELECTION_SCORING} mean", f"CV {FEATURE_SELECTION_SCORING} std", "Feature set", "Feature selection comparison", f"CV {FEATURE_SELECTION_SCORING}", os.path.join(OUTPUT_DIR, "feature_selection_comparison.png"))
+    subtitle("Ablation study — supporting comparison")
+    ablation_df = ablation_study(X_train, y_train, cv)
+    print(ablation_df.to_string(index=False)); save_csv(ablation_df, "ablation_study_supporting.csv")
+    barh_plot(ablation_df, f"CV {FEATURE_SELECTION_SCORING} mean", f"CV {FEATURE_SELECTION_SCORING} std", "Feature set", "Ablation study — supporting comparison only", f"CV {FEATURE_SELECTION_SCORING}", os.path.join(OUTPUT_DIR, "ablation_study_supporting.png"))
+    Xtr, Xte = X_train[selected_features].copy(), X_test[selected_features].copy()
+    subtitle("Training models")
+    models = {
+        "Logistic Regression": LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE).fit(Xtr, y_train),
+    }
+    rf_grid = {"n_estimators": [100, 300], "max_depth": [None, 8, 16], "min_samples_split": [2, 5], "min_samples_leaf": [1, 2]}
+    rf = GridSearchCV(RandomForestClassifier(class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1), rf_grid, scoring=GRIDSEARCH_SCORING, cv=cv, n_jobs=-1, refit=True, verbose=1)
+    rf.fit(Xtr, y_train); models["Random Forest"] = rf.best_estimator_; print("RF best:", rf.best_params_)
+    if XGBOOST_AVAILABLE and RUN_XGBOOST:
+        xgb_grid = {"n_estimators": [100, 300], "max_depth": [3, 6], "learning_rate": [0.05, 0.1], "subsample": [0.8, 1.0], "colsample_bytree": [0.8, 1.0]}
+        xgb = GridSearchCV(XGBClassifier(scale_pos_weight=imbal_ratio, eval_metric="logloss", random_state=RANDOM_STATE, n_jobs=-1, verbosity=0), xgb_grid, scoring=GRIDSEARCH_SCORING, cv=cv, n_jobs=-1, refit=True, verbose=1)
+        xgb.fit(Xtr, y_train); models["XGBoost"] = xgb.best_estimator_; print("XGB best:", xgb.best_params_)
+    subtitle("Threshold tuning and evaluation")
+    all_results, main_results = [], []
+    for name, model in models.items():
+        for strat in strategies(model, Xtr, y_train, cv):
+            res = evaluate(name, model, Xte, y_test, strat)
+            all_results.append(res)
+            if strat["mode"].startswith(MAIN_THRESHOLD_MODE):
+                main_results.append(res)
+    baselines = baseline_results(Xtr, y_train, Xte, y_test)
+    metrics_df = pd.DataFrame([clean_result_dict(r) for r in main_results]).set_index("Model")
+    strategy_df = pd.DataFrame([clean_result_dict(r) for r in all_results])
+    baseline_df = pd.DataFrame([clean_result_dict(r) for r in baselines])
+    print(metrics_df.to_string())
+    save_csv(metrics_df.reset_index(), "model_metrics_main_threshold.csv")
+    save_csv(strategy_df, "model_metrics_all_thresholds.csv")
+    save_csv(baseline_df, "baseline_metrics.csv")
+    best_name = str(metrics_df[BEST_SELECTION_METRIC].idxmax())
+    best_model = models[best_name]
+    best_results = [r for r in all_results if r["Model"] == best_name]
+    print(f"\nBest model by {BEST_SELECTION_METRIC}: {best_name}")
+    subtitle("Class-weight sensitivity")
+    class_weight_sensitivity(Xtr, y_train, Xte, y_test, cv)
+    subtitle("Saving plots and artefacts")
+    make_plots(models, main_results, all_results, baselines, best_name, best_model, best_results, X_test, y_test, selected_features)
+    artefacts = {
+        "selected_feature_set": selected_set,
+        "selected_features": selected_features,
+        "main_threshold_mode": MAIN_THRESHOLD_MODE,
+        "best_model": best_name,
+        "best_metrics": clean_result_dict(metrics_df.reset_index().query("Model == @best_name").iloc[0].to_dict()),
+        "scaler_saved": scaler is not None,
+        "note": "Scaler is only saved if src.preprocessing.load_and_preprocess returns it as 6th object.",
+    }
+    with open(os.path.join(OUTPUT_DIR, "model_summary.json"), "w") as f:
+        json.dump(artefacts, f, indent=2)
+    joblib.dump({"models": models, "best_model": best_model, "selected_features": selected_features, "scaler": scaler}, os.path.join(OUTPUT_DIR, "trained_models.joblib"))
+    print(f"\nDone. Outputs saved to: {OUTPUT_DIR}")
+if __name__ == "__main__":
+    main()
