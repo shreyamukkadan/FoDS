@@ -1,5 +1,5 @@
 """
-src/p3/models.py — compact P3 model pipeline
+src/p3/models.py — compact P3 model pipeline, TA-feedback version
 Run from project root:
     python -m src.p3.models
 Requires:
@@ -7,6 +7,13 @@ Requires:
     src/preprocessing.py with load_and_preprocess(...)
 Outputs:
     outputs/p3/*.csv, *.json, *.png, *.joblib
+
+TA-feedback additions:
+    - Feature selection remains before final model training, but is validated with
+      a nested-CV check where feature selection is repeated inside each outer fold.
+    - Models are also trained/evaluated on all features, so feature selection can
+      be compared against a simple all-features baseline, not only dummy baselines.
+    - Held-out test set is still used only for final evaluation.
 """
 import json
 import os
@@ -49,11 +56,8 @@ MIN_PRECISION_TARGET = 0.50
 BEST_SELECTION_METRIC = "F1"
 RUN_XGBOOST = True
 RUN_BACKWARD_SELECTION = True
-CONTINUOUS_COLS = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
-BINARY_COLS = [
-    "Family_History", "Radiation_Exposure", "Iodine_Deficiency",
-    "Smoking", "Obesity", "Diabetes",
-]
+RUN_NESTED_CV_CHECK = True
+NESTED_CV_INNER_FOLDS = 3
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 def title(text: str) -> None:
     print("\n" + "=" * 80 + f"\n{text}\n" + "=" * 80)
@@ -152,23 +156,52 @@ def compare_feature_sets(X, y, full, forward, backward, estimator, cv, scoring) 
         })
     df = pd.DataFrame(rows).sort_values(f"CV {scoring} mean", ascending=False)
     return str(df.iloc[0]["Feature set"]), list(df.iloc[0]["Features"]), df
-def ablation_study(X, y, cv, scoring=FEATURE_SELECTION_SCORING) -> pd.DataFrame:
-    sets = {
-        "Clinical continuous only": [c for c in CONTINUOUS_COLS if c in X.columns],
-        "Binary risk factors + Gender": [c for c in BINARY_COLS + ["Gender"] if c in X.columns],
-        "All retained features": list(X.columns),
+
+def nested_cv_feature_selection(X, y, features, estimator, direction="forward", scoring=FEATURE_SELECTION_SCORING) -> Dict:
+    """
+    Leakage-free sanity check for feature selection.
+    In each outer CV fold, feature selection is performed only on that fold's
+    training portion, then evaluated on the fold's validation portion.
+    """
+    outer_cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    inner_cv = StratifiedKFold(n_splits=NESTED_CV_INNER_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    scores, n_features = [], []
+    selected_per_fold = []
+    X = X.reset_index(drop=True)
+    y = y.reset_index(drop=True)
+
+    for train_idx, val_idx in outer_cv.split(X, y):
+        X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+        if direction == "forward":
+            selected, _ = forward_selection(X_tr, y_tr, features, estimator, inner_cv, scoring)
+        elif direction == "backward":
+            selected, _ = backward_elimination(X_tr, y_tr, features, estimator, inner_cv, scoring)
+        else:
+            raise ValueError("direction must be 'forward' or 'backward'")
+
+        model = clone(estimator).fit(X_tr[selected], y_tr)
+        proba = model.predict_proba(X_val[selected])[:, 1]
+        scores.append(average_precision_score(y_val, proba))
+        n_features.append(len(selected))
+        selected_per_fold.append(selected)
+
+    if direction == "forward":
+        selected_full, _ = forward_selection(X, y, features, estimator, inner_cv, scoring)
+    else:
+        selected_full, _ = backward_elimination(X, y, features, estimator, inner_cv, scoring)
+
+    return {
+        "Direction": direction,
+        "Outer CV AP mean": round(float(np.mean(scores)), 5),
+        "Outer CV AP std": round(float(np.std(scores)), 5),
+        "Outer CV AP scores": [round(float(s), 5) for s in scores],
+        "Mean n_features": round(float(np.mean(n_features)), 2),
+        "Features when fit on full training set": selected_full,
+        "Selected features per fold": selected_per_fold,
     }
-    est = LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE)
-    rows = []
-    for name, feats in sets.items():
-        ap, ap_std = cv_score(est, X, y, feats, cv, scoring)
-        auc, auc_std = cv_score(est, X, y, feats, cv, "roc_auc")
-        rows.append({
-            "Feature set": name, "n_features": len(feats), "Features": feats,
-            f"CV {scoring} mean": round(ap, 5), f"CV {scoring} std": round(ap_std, 5),
-            "CV ROC-AUC mean": round(auc, 5), "CV ROC-AUC std": round(auc_std, 5),
-        })
-    return pd.DataFrame(rows).sort_values(f"CV {scoring} mean", ascending=False)
+
 def threshold_f1(probs, y):
     p, r, t = precision_recall_curve(y, probs)
     p, r = p[:-1], r[:-1]
@@ -243,6 +276,38 @@ def baseline_results(X_train, y_train, X_test, y_test) -> List[Dict]:
             "Note": "", "_y_pred": pred, "_y_proba": proba,
         })
     return rows
+
+def train_model_family(X_train, y_train, imbal_ratio, label="") -> Dict:
+    """Train LogReg, RF and XGB using the same setup as the original pipeline."""
+    models = {
+        "Logistic Regression": LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE).fit(X_train, y_train),
+    }
+    rf_grid = {"n_estimators": [100, 300], "max_depth": [None, 8, 16], "min_samples_split": [2, 5], "min_samples_leaf": [1, 2]}
+    rf = GridSearchCV(RandomForestClassifier(class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1), rf_grid, scoring=GRIDSEARCH_SCORING, cv=CV_FOLDS, n_jobs=-1, refit=True, verbose=1)
+    rf.fit(X_train, y_train)
+    models["Random Forest"] = rf.best_estimator_
+    print(f"RF best {label}:", rf.best_params_)
+    if XGBOOST_AVAILABLE and RUN_XGBOOST:
+        xgb_grid = {"n_estimators": [100, 300], "max_depth": [3, 6], "learning_rate": [0.05, 0.1], "subsample": [0.8, 1.0], "colsample_bytree": [0.8, 1.0]}
+        xgb = GridSearchCV(XGBClassifier(scale_pos_weight=imbal_ratio, eval_metric="logloss", random_state=RANDOM_STATE, n_jobs=-1, verbosity=0), xgb_grid, scoring=GRIDSEARCH_SCORING, cv=CV_FOLDS, n_jobs=-1, refit=True, verbose=1)
+        xgb.fit(X_train, y_train)
+        models["XGBoost"] = xgb.best_estimator_
+        print(f"XGB best {label}:", xgb.best_params_)
+    return models
+
+
+def evaluate_model_family(models: Dict, X_train, y_train, X_test, y_test, cv, variant: str) -> Tuple[List[Dict], List[Dict]]:
+    """Evaluate each fitted model with the same CV-based threshold tuning."""
+    all_results, main_results = [], []
+    for name, model in models.items():
+        for strat in strategies(model, X_train, y_train, cv):
+            res = evaluate(name, model, X_test, y_test, strat)
+            res["Variant"] = variant
+            all_results.append(res)
+            if strat["mode"].startswith(MAIN_THRESHOLD_MODE):
+                main_results.append(res)
+    return all_results, main_results
+
 def barh_plot(df, score_col, std_col, label_col, title_text, xlabel, path):
     d = df.copy().sort_values(score_col, ascending=True)
     fig, ax = plt.subplots(figsize=(9, 4.8))
@@ -381,38 +446,60 @@ def main() -> None:
     print(feature_df.to_string(index=False)); print(f"\nChosen: {selected_set} — {len(selected_features)} features")
     save_csv(feature_df, "feature_set_comparison.csv")
     barh_plot(feature_df, f"CV {FEATURE_SELECTION_SCORING} mean", f"CV {FEATURE_SELECTION_SCORING} std", "Feature set", "Feature selection comparison", f"CV {FEATURE_SELECTION_SCORING}", os.path.join(OUTPUT_DIR, "feature_selection_comparison.png"))
-    subtitle("Ablation study — supporting comparison")
-    ablation_df = ablation_study(X_train, y_train, cv)
-    print(ablation_df.to_string(index=False)); save_csv(ablation_df, "ablation_study_supporting.csv")
-    barh_plot(ablation_df, f"CV {FEATURE_SELECTION_SCORING} mean", f"CV {FEATURE_SELECTION_SCORING} std", "Feature set", "Ablation study — supporting comparison only", f"CV {FEATURE_SELECTION_SCORING}", os.path.join(OUTPUT_DIR, "ablation_study_supporting.png"))
     Xtr, Xte = X_train[selected_features].copy(), X_test[selected_features].copy()
-    subtitle("Training models")
-    models = {
-        "Logistic Regression": LogisticRegression(class_weight="balanced", max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE).fit(Xtr, y_train),
-    }
-    rf_grid = {"n_estimators": [100, 300], "max_depth": [None, 8, 16], "min_samples_split": [2, 5], "min_samples_leaf": [1, 2]}
-    rf = GridSearchCV(RandomForestClassifier(class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1), rf_grid, scoring=GRIDSEARCH_SCORING, cv=cv, n_jobs=-1, refit=True, verbose=1)
-    rf.fit(Xtr, y_train); models["Random Forest"] = rf.best_estimator_; print("RF best:", rf.best_params_)
-    if XGBOOST_AVAILABLE and RUN_XGBOOST:
-        xgb_grid = {"n_estimators": [100, 300], "max_depth": [3, 6], "learning_rate": [0.05, 0.1], "subsample": [0.8, 1.0], "colsample_bytree": [0.8, 1.0]}
-        xgb = GridSearchCV(XGBClassifier(scale_pos_weight=imbal_ratio, eval_metric="logloss", random_state=RANDOM_STATE, n_jobs=-1, verbosity=0), xgb_grid, scoring=GRIDSEARCH_SCORING, cv=cv, n_jobs=-1, refit=True, verbose=1)
-        xgb.fit(Xtr, y_train); models["XGBoost"] = xgb.best_estimator_; print("XGB best:", xgb.best_params_)
+
+    # Leakage-free sanity check: feature selection is repeated inside outer CV folds.
+    nested_cv_df = pd.DataFrame()
+    if RUN_NESTED_CV_CHECK:
+        subtitle("Nested-CV check for feature selection leakage")
+        nested_reports = []
+        for direction in ["forward", "backward"]:
+            report = nested_cv_feature_selection(X_train, y_train, feature_names, selector, direction, FEATURE_SELECTION_SCORING)
+            nested_reports.append(report)
+            print(f"{direction}: AP = {report['Outer CV AP mean']:.5f} ± {report['Outer CV AP std']:.5f}")
+            print(f"Features on full training set: {report['Features when fit on full training set']}")
+        nested_cv_df = pd.DataFrame(nested_reports)
+        save_csv(nested_cv_df, "nested_cv_feature_selection.csv")
+
+    subtitle("Training models on selected features")
+    models = train_model_family(Xtr, y_train, imbal_ratio, label="selected features")
+
+    subtitle("Training all-features baseline models")
+    all_feature_models = train_model_family(X_train, y_train, imbal_ratio, label="all features")
+
     subtitle("Threshold tuning and evaluation")
-    all_results, main_results = [], []
-    for name, model in models.items():
-        for strat in strategies(model, Xtr, y_train, cv):
-            res = evaluate(name, model, Xte, y_test, strat)
-            all_results.append(res)
-            if strat["mode"].startswith(MAIN_THRESHOLD_MODE):
-                main_results.append(res)
+    all_results, main_results = evaluate_model_family(models, Xtr, y_train, Xte, y_test, cv, "selected features")
+    all_feature_results, all_feature_main_results = evaluate_model_family(all_feature_models, X_train, y_train, X_test, y_test, cv, "all features")
     baselines = baseline_results(Xtr, y_train, Xte, y_test)
     metrics_df = pd.DataFrame([clean_result_dict(r) for r in main_results]).set_index("Model")
     strategy_df = pd.DataFrame([clean_result_dict(r) for r in all_results])
     baseline_df = pd.DataFrame([clean_result_dict(r) for r in baselines])
+    all_feature_metrics_df = pd.DataFrame(
+        [clean_result_dict(r) for r in all_feature_main_results]
+    ).set_index("Model")
+
+    all_feature_strategy_df = pd.DataFrame(
+        [clean_result_dict(r) for r in all_feature_results]
+    )
+
+    comparison_df = pd.concat(
+        [
+            pd.DataFrame([clean_result_dict(r) for r in main_results]),
+            pd.DataFrame([clean_result_dict(r) for r in all_feature_main_results]),
+            pd.DataFrame([clean_result_dict(r) for r in baselines]),
+        ],
+        ignore_index=True,
+    )
     print(metrics_df.to_string())
     save_csv(metrics_df.reset_index(), "model_metrics_main_threshold.csv")
     save_csv(strategy_df, "model_metrics_all_thresholds.csv")
     save_csv(baseline_df, "baseline_metrics.csv")
+    save_csv(all_feature_metrics_df.reset_index(), "all_features_model_metrics_main_threshold.csv")
+    save_csv(all_feature_strategy_df, "all_features_model_metrics_all_thresholds.csv")
+    save_csv(comparison_df, "selected_vs_all_features_vs_dummy_comparison.csv")
+
+    print("\nSelected features vs all features vs dummy baselines:")
+    print(comparison_df.to_string(index=False))
     best_name = str(metrics_df[BEST_SELECTION_METRIC].idxmax())
     best_model = models[best_name]
     best_results = [r for r in all_results if r["Model"] == best_name]
@@ -429,6 +516,12 @@ def main() -> None:
         "best_metrics": clean_result_dict(metrics_df.reset_index().query("Model == @best_name").iloc[0].to_dict()),
         "scaler_saved": scaler is not None,
         "note": "Scaler is only saved if src.preprocessing.load_and_preprocess returns it as 6th object.",
+        "methodology": {
+            "train_test_split": "Stratified 80/20 split from preprocessing; held-out test set used only for final evaluation.",
+            "feature_selection": "Forward/backward selection performed on training data; nested-CV check repeats FS inside outer folds to document leakage-free estimate.",
+            "all_features_baseline": "LogReg/RF/XGB also evaluated with all features using the same CV-based threshold tuning.",
+            "class_imbalance": "LogReg/RF use class_weight='balanced'; XGBoost uses scale_pos_weight; threshold tuning uses CV probabilities.",
+        },
     }
     with open(os.path.join(OUTPUT_DIR, "model_summary.json"), "w") as f:
         json.dump(artefacts, f, indent=2)

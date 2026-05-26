@@ -1,0 +1,6 @@
+Step,Action,Feature,Selected features after step,CV average_precision mean,CV average_precision std,Improvement,Accepted
+1,add,Family_History,['Family_History'],0.2708,0.00131,0.2708,True
+2,add,Iodine_Deficiency,"['Family_History', 'Iodine_Deficiency']",0.29288,0.00156,0.02208,True
+3,add,T3_Level,"['Family_History', 'Iodine_Deficiency', 'T3_Level']",0.31083,0.00303,0.01795,True
+4,add,Radiation_Exposure,"['Family_History', 'Iodine_Deficiency', 'T3_Level', 'Radiation_Exposure']",0.3244,0.00336,0.01357,True
+5,stop,TSH_Level,"['Family_History', 'Iodine_Deficiency', 'T3_Level', 'Radiation_Exposure']",0.32447,0.00363,6e-05,False

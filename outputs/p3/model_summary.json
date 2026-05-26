@@ -21,8 +21,15 @@
     "Accuracy": 0.5469,
     "ROC-AUC": 0.624,
     "Average Precision": 0.3286,
-    "Note": ""
+    "Note": "",
+    "Variant": "selected features"
   },
   "scaler_saved": false,
-  "note": "Scaler is only saved if src.preprocessing.load_and_preprocess returns it as 6th object."
+  "note": "Scaler is only saved if src.preprocessing.load_and_preprocess returns it as 6th object.",
+  "methodology": {
+    "train_test_split": "Stratified 80/20 split from preprocessing; held-out test set used only for final evaluation.",
+    "feature_selection": "Forward/backward selection performed on training data; nested-CV check repeats FS inside outer folds to document leakage-free estimate.",
+    "all_features_baseline": "LogReg/RF/XGB also evaluated with all features using the same CV-based threshold tuning.",
+    "class_imbalance": "LogReg/RF use class_weight='balanced'; XGBoost uses scale_pos_weight; threshold tuning uses CV probabilities."
+  }
 }
