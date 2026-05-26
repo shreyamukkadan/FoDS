@@ -24,7 +24,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import zscore
 
 from sklearn.base import clone
 from sklearn.cluster import KMeans
@@ -35,8 +34,9 @@ from sklearn.metrics import (
     normalized_mutual_info_score,
     precision_recall_curve,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+
+from src.p1.preprocessing import load_and_preprocess as load_p1_preprocessed_data
 
 warnings.filterwarnings("ignore")
 
@@ -58,85 +58,25 @@ os.makedirs(P4_OUTPUT_DIR, exist_ok=True)
 
 def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True):
     """
-    Same preprocessing structure used in P3.
+    Load the same P1 preprocessing output used by P3.
 
     Returns scaled train/test features, labels, and feature names.
     Diagnosis is the target and is not included in X.
     """
-    continuous_cols = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
-    binary_cols = [
-        "Family_History",
-        "Radiation_Exposure",
-        "Iodine_Deficiency",
-        "Smoking",
-        "Obesity",
-        "Diabetes",
-    ]
-    engineered_cols = [
-        "TSH_T3_ratio",
-        "TSH_T4_ratio",
-        "T3_T4_ratio",
-        "Risk_count",
-        "Age_Nodule",
-    ]
-
-    df = pd.read_csv(data_path)
-    rows_before_null = len(df)
-    df.dropna(inplace=True)
-
-    z = df[continuous_cols].apply(zscore)
-    mask_clean = (z.abs() <= 3).all(axis=1)
-    df_clean = df[mask_clean].copy()
-
-    df_model = df_clean.copy()
-    df_model.drop(
-        columns=["Patient_ID", "Country", "Ethnicity", "Thyroid_Cancer_Risk"],
-        inplace=True,
-    )
-
-    for col in binary_cols:
-        df_model[col] = (df_model[col] == "Yes").astype(int)
-
-    df_model["Gender"] = (df_model["Gender"] == "Male").astype(int)
-
-    df_model["TSH_T3_ratio"] = df_model["TSH_Level"] / (df_model["T3_Level"] + 1e-6)
-    df_model["TSH_T4_ratio"] = df_model["TSH_Level"] / (df_model["T4_Level"] + 1e-6)
-    df_model["T3_T4_ratio"] = df_model["T3_Level"] / (df_model["T4_Level"] + 1e-6)
-    df_model["Risk_count"] = df_model[binary_cols].sum(axis=1)
-    df_model["Age_Nodule"] = df_model["Age"] * df_model["Nodule_Size"]
-
-    df_model["Diagnosis"] = (df_model["Diagnosis"] == "Malignant").astype(int)
-
-    X = df_model.drop(columns=["Diagnosis"])
-    y = df_model["Diagnosis"]
-    feature_names = X.columns.tolist()
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_size,
+    result = load_p1_preprocessed_data(
+        data_path=data_path,
         random_state=random_state,
-        stratify=y,
+        test_size=test_size,
+        verbose=verbose,
     )
 
-    scaler = StandardScaler()
-    cols_to_scale = continuous_cols + engineered_cols
-
-    X_train_sc = X_train.copy()
-    X_test_sc = X_test.copy()
-
-    X_train_sc[cols_to_scale] = X_train_sc[cols_to_scale].astype(float)
-    X_test_sc[cols_to_scale] = X_test_sc[cols_to_scale].astype(float)
-
-    X_train_sc[cols_to_scale] = scaler.fit_transform(X_train[cols_to_scale])
-    X_test_sc[cols_to_scale] = scaler.transform(X_test[cols_to_scale])
+    if len(result) == 6:
+        X_train_sc, X_test_sc, y_train, y_test, feature_names, _ = result
+    else:
+        X_train_sc, X_test_sc, y_train, y_test, feature_names = result
 
     if verbose:
-        print(f"Loaded {rows_before_null:,} rows.")
-        print(f"After null removal and outlier filtering: {len(df_model):,} rows.")
-        print(f"Features used for P4: {feature_names}")
-        print(f"Training rows: {len(X_train_sc):,}")
-        print(f"Test rows: {len(X_test_sc):,}")
+        print("\nP4 is using the same preprocessed feature matrix as P3.")
 
     return X_train_sc, X_test_sc, y_train, y_test, feature_names
 
@@ -146,8 +86,41 @@ def load_and_preprocess(data_path, random_state=42, test_size=0.2, verbose=True)
 
 def load_best_p3_model():
     """
-    Load the single best model selected by P3.
+    Load the best model selected by P3.
+
+    Current P3 writes a model bundle to trained_models.joblib and a summary to
+    model_summary.json. Older runs may also have best_model_meta.json and
+    best_model.joblib, so those are kept as a fallback.
     """
+    bundle_path = os.path.join(P3_OUTPUT_DIR, "trained_models.joblib")
+    summary_path = os.path.join(P3_OUTPUT_DIR, "model_summary.json")
+
+    if os.path.exists(bundle_path):
+        try:
+            bundle = joblib.load(bundle_path)
+        except Exception as exc:
+            print(
+                "\nCould not load P3 trained_models.joblib bundle; "
+                f"falling back to best_model.joblib. ({exc})"
+            )
+        else:
+            model = bundle["best_model"]
+
+            if os.path.exists(summary_path):
+                with open(summary_path, "r") as fh:
+                    meta = json.load(fh)
+            else:
+                meta = {}
+
+            meta.setdefault("name", meta.get("best_model", "Best P3 model"))
+            meta.setdefault("selected_features", bundle.get("selected_features", []))
+
+            print("\nBest P3 model loaded:")
+            print(f"  Model:             {meta['name']}")
+            print(f"  Selected features: {meta['selected_features']}")
+
+            return meta, model
+
     meta_path = os.path.join(P3_OUTPUT_DIR, "best_model_meta.json")
 
     with open(meta_path, "r") as fh:
