@@ -1,0 +1,9 @@
+Model,Strategy,Mode,Threshold,CV Precision,CV Recall,F1,Precision,Recall,Accuracy,ROC-AUC,Average Precision,Note,Variant
+Logistic Regression,F1-optimal (screening),f1,0.507,0.2985,0.7091,0.4216,0.2999,0.7097,0.5469,0.624,0.3286,,selected features
+Random Forest,F1-optimal (screening),f1,0.41,0.2979,0.7104,0.4214,0.2994,0.7107,0.5457,0.6244,0.3257,,selected features
+XGBoost,F1-optimal (screening),f1,0.469,0.2983,0.7096,0.4216,0.2999,0.7095,0.547,0.6244,0.3276,,selected features
+Logistic Regression,F1-optimal (screening),f1,0.399,0.2983,0.7099,0.4216,0.2999,0.7097,0.5469,0.6245,0.3272,,all features
+Random Forest,F1-optimal (screening),f1,0.456,0.2985,0.7093,0.4215,0.2999,0.7089,0.5471,0.6245,0.3274,,all features
+XGBoost,F1-optimal (screening),f1,0.49,0.2984,0.7095,0.4216,0.3,0.7093,0.5472,0.6248,0.3294,,all features
+Dummy (Majority),most_frequent,naive,,,,0.0,0.0,0.0,0.7673,0.5,0.2327,,
+Dummy (Stratified),stratified,naive,,,,0.2385,0.239,0.2379,0.6464,0.5041,0.2342,,

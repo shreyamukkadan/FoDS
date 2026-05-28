@@ -18,6 +18,7 @@ TA-feedback additions:
 import json
 import os
 import warnings
+from datetime import datetime
 from typing import Dict, List, Tuple
 import joblib
 import matplotlib
@@ -44,7 +45,9 @@ except ImportError:
     XGBOOST_AVAILABLE = False
     print("XGBoost not installed — skipping XGBoost.")
 DATA_PATH = "data/thyroid_cancer_risk_data.csv"
-OUTPUT_DIR = "outputs/p3"
+BASE_OUTPUT_DIR = "outputs/p3"
+RUN_ID = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, RUN_ID)
 RANDOM_STATE = 42
 CV_FOLDS = 5
 TEST_SIZE = 0.20
@@ -58,7 +61,7 @@ RUN_XGBOOST = True
 RUN_BACKWARD_SELECTION = True
 RUN_NESTED_CV_CHECK = True
 NESTED_CV_INNER_FOLDS = 3
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=False)
 def title(text: str) -> None:
     print("\n" + "=" * 80 + f"\n{text}\n" + "=" * 80)
 def subtitle(text: str) -> None:
