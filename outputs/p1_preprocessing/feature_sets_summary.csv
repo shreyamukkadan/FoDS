@@ -1,0 +1,9 @@
+Feature set,n_raw_features,Description,Columns
+full,15,All available features except Patient_ID.,"Age, Gender, Country, Ethnicity, Family_History, Radiation_Exposure, Iodine_Deficiency, Smoking, Obesity, Diabetes, TSH_Level, T3_Level, T4_Level, Nodule_Size, Thyroid_Cancer_Risk"
+restricted_original,12,"Original clinical setup without Country, Ethnicity, and Thyroid_Cancer_Risk.","Age, Gender, Family_History, Radiation_Exposure, Iodine_Deficiency, Smoking, Obesity, Diabetes, TSH_Level, T3_Level, T4_Level, Nodule_Size"
+full_without_risk,14,All features except Patient_ID and Thyroid_Cancer_Risk.,"Age, Gender, Country, Ethnicity, Family_History, Radiation_Exposure, Iodine_Deficiency, Smoking, Obesity, Diabetes, TSH_Level, T3_Level, T4_Level, Nodule_Size"
+risk_only,1,Only Thyroid_Cancer_Risk.,Thyroid_Cancer_Risk
+groups_only,2,Only Country and Ethnicity.,"Country, Ethnicity"
+risk_plus_groups,3,Thyroid_Cancer_Risk plus Country and Ethnicity.,"Thyroid_Cancer_Risk, Country, Ethnicity"
+continuous_only,5,"Only Age, TSH, T3, T4, and Nodule_Size.","Age, TSH_Level, T3_Level, T4_Level, Nodule_Size"
+binary_clinical,7,Binary risk factors plus Gender.,"Family_History, Radiation_Exposure, Iodine_Deficiency, Smoking, Obesity, Diabetes, Gender"

@@ -26,7 +26,7 @@ except ImportError:
     print("statsmodels not installed — FDR correction will be skipped.")
     print("Install with: pip install statsmodels")
 
-from src.p1.preprocessing import load_and_preprocess
+from src.p1.preprocessing import load_raw, split_then_filter_outliers
 
 
 # =============================================================================
@@ -134,32 +134,31 @@ print("SECTION 3 — STATISTICAL TESTING")
 print("=" * 70)
 
 
-X_train_sc, X_test_sc, y_train, y_test, feature_names = load_and_preprocess(
-    data_path=DATA_PATH,
+df_raw = load_raw(DATA_PATH)
+split = split_then_filter_outliers(
+    df_raw,
     random_state=42,
     test_size=0.2,
-    verbose=True
 )
 
-# ---------------------------------------------------------------------------
-# Rebuild cleaned full dataset for statistical testing
-# ---------------------------------------------------------------------------
+df_train = split["X_train"].copy()
+df_train["Diagnosis"] = split["y_train"]
 
-df_raw = pd.read_csv(DATA_PATH)
-df_raw = df_raw.dropna().copy()
+df_test = split["X_test"].copy()
+df_test["Diagnosis"] = split["y_test"]
 
-# Removing outliers as in P1's preprocessing
-z_scores = df_raw[CONTINUOUS_COLS].apply(stats.zscore)
-mask_clean = (z_scores.abs() <= 3).all(axis=1)
-df_clean = df_raw.loc[mask_clean].copy()
+df_clean = pd.concat([df_train, df_test], axis=0)
 
 # Encoding variables for statistical testing
 for col in BINARY_COLS:
     df_clean[col] = (df_clean[col] == "Yes").astype(int)
 
 df_clean["Gender"] = (df_clean["Gender"] == "Male").astype(int)
-df_clean["Diagnosis"] = (df_clean["Diagnosis"] == "Malignant").astype(int)
 
+
+print("\nUsing P1 preprocessing basis:")
+print(f"Train rows after outlier filtering: {len(split['X_train']):,}")
+print(f"Test rows, unfiltered: {len(split['X_test']):,}")
 
 print("\nCleaned dataset ready for statistics:")
 print(f"Rows used for stats: {len(df_clean):,}")

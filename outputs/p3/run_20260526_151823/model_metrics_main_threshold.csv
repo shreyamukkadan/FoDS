@@ -1,4 +1,0 @@
-Model,Strategy,Mode,Threshold,CV Precision,CV Recall,F1,Precision,Recall,Accuracy,ROC-AUC,Average Precision,Note,Variant
-Logistic Regression,F1-optimal (screening),f1,0.507,0.2985,0.7091,0.4216,0.2999,0.7097,0.5469,0.624,0.3286,,selected features
-Random Forest,F1-optimal (screening),f1,0.41,0.2979,0.7104,0.4214,0.2994,0.7107,0.5457,0.6244,0.3257,,selected features
-XGBoost,F1-optimal (screening),f1,0.469,0.2983,0.7096,0.4216,0.2999,0.7095,0.547,0.6244,0.3276,,selected features
