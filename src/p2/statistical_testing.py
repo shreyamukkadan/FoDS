@@ -12,6 +12,8 @@ Tests included:
     5. Benjamini-Hochberg FDR correction for multiple testing
 """
 
+import os
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -24,7 +26,7 @@ except ImportError:
     print("statsmodels not installed — FDR correction will be skipped.")
     print("Install with: pip install statsmodels")
 
-from src.preprocessing import load_and_preprocess
+from src.p1.preprocessing import load_and_preprocess
 
 
 # =============================================================================
@@ -32,6 +34,9 @@ from src.preprocessing import load_and_preprocess
 # =============================================================================
 
 DATA_PATH = "data/thyroid_cancer_risk_data.csv"
+OUTPUT_DIR = "outputs/p2"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 CONTINUOUS_COLS = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
 
@@ -327,10 +332,13 @@ if not mw_results_df.empty:
 # 3D. SAVE OUTPUT TABLES
 # =============================================================================
 
-chi_results_df.to_csv("chi_square_results.csv", index=False)
-mw_results_df.to_csv("mann_whitney_results.csv", index=False)
+chi_path = os.path.join(OUTPUT_DIR, "chi_square_results.csv")
+mw_path = os.path.join(OUTPUT_DIR, "mann_whitney_results.csv")
+
+chi_results_df.to_csv(chi_path, index=False)
+mw_results_df.to_csv(mw_path, index=False)
 
 print("\nSaved output files:")
-print(" - chi_square_results.csv")
-print(" - mann_whitney_results.csv")
+print(f" - {chi_path}")
+print(f" - {mw_path}")
 print("\nDone.")
