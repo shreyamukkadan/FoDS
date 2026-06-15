@@ -1,8 +1,10 @@
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parent
+
 # Paths
-DATA_PATH = Path("data/thyroid_cancer_risk_data.csv")
-OUT_P1 = Path("outputs/p1_preprocessing")
+DATA_PATH = _ROOT / "data" / "thyroid_cancer_risk_data.csv"
+OUT_P1 = _ROOT / "outputs" / "p1_preprocessing"
 
 # Core columns
 ID_COL = "Patient_ID"

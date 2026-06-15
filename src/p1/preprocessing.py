@@ -26,8 +26,8 @@ What changed relative to the previous version, and why
 4. A per-group diagnostics table (n and malignancy rate per Country/Ethnicity in
    train and test) is written out to support interpretation.
 
-Run from chatgbt_code_final:
-    python src/preprocessing.py
+Run from project root:
+    python -m src.p1.preprocessing
 """
 
 from __future__ import annotations
@@ -36,18 +36,17 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 try:
     _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-except NameError:  # running inside a Jupyter / VS Code notebook cell, where __file__ is undefined
+except NameError:
     _PROJECT_ROOT = Path.cwd()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(_PROJECT_ROOT / ".matplotlib_cache"))
 
 import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -74,7 +73,6 @@ from config import (
     Z_THRESHOLD,
 )
 
-# Optional config overrides; sensible defaults if they are not present in config.py.
 try:
     from config import RISK_ENCODING  # "onehot" (default) or "ordinal"
 except ImportError:
@@ -83,7 +81,7 @@ except ImportError:
 GROUP_COLS = [COUNTRY, ETHNICITY]
 
 
-def load_raw(data_path: Path = DATA_PATH) -> pd.DataFrame:
+def load_raw(data_path=DATA_PATH) -> pd.DataFrame:
     df = pd.read_csv(data_path)
     before = len(df)
     df = df.dropna().copy()
@@ -216,8 +214,7 @@ def build_preprocessor(feature_cols: List[str], risk_encoding: str = RISK_ENCODI
 
 
 def transformed_feature_names(preprocessor: ColumnTransformer) -> List[str]:
-    """Expanded output feature names. Works for ordinal/scaler (pass-through names)
-    and one-hot (expanded names) alike."""
+    """Expanded output feature names after fitting. Works for ordinal/scaler and one-hot alike."""
     names: List[str] = []
     for name, transformer, cols in preprocessor.transformers_:
         if name == "remainder" or transformer == "drop":
@@ -230,6 +227,44 @@ def transformed_feature_names(preprocessor: ColumnTransformer) -> List[str]:
                 pass
         names.extend(list(cols))
     return names
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline helper — used by src/p3/models.py
+# ---------------------------------------------------------------------------
+def load_and_preprocess(
+    data_path=DATA_PATH,
+    feature_set: str = "full",
+    random_state: int = RANDOM_STATE,
+    test_size: float = TEST_SIZE,
+    verbose: bool = False,
+) -> Tuple:
+    """Load, split, and apply the full preprocessing pipeline.
+
+    Returns (X_train, X_test, y_train, y_test, feature_names) as DataFrames/Series.
+    The split and outlier filtering are identical to split_then_filter_outliers().
+    """
+    df = load_raw(data_path)
+    split = split_then_filter_outliers(df, test_size=test_size, random_state=random_state)
+
+    feature_cols = select_features(df, feature_set)
+    preprocessor = build_preprocessor(feature_cols)
+
+    X_train_arr = preprocessor.fit_transform(split["X_train"][feature_cols])
+    X_test_arr = preprocessor.transform(split["X_test"][feature_cols])
+
+    feature_names = transformed_feature_names(preprocessor)
+
+    X_train = pd.DataFrame(X_train_arr, columns=feature_names)
+    X_test = pd.DataFrame(X_test_arr, columns=feature_names)
+
+    if verbose:
+        print(f"Rows after dropna: {len(df):,}")
+        print(f"Train rows (after outlier filter): {len(X_train):,}")
+        print(f"Test rows (unfiltered): {len(X_test):,}")
+        print(f"Features ({len(feature_names)}): {feature_names}")
+
+    return X_train, X_test, split["y_train"].reset_index(drop=True), split["y_test"].reset_index(drop=True), feature_names
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +326,11 @@ def group_diagnostics(split: Dict) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# EDA helpers (unchanged behaviour)
+# EDA helpers
 # ---------------------------------------------------------------------------
 def malignancy_rates(df: pd.DataFrame, col: str, min_n: int = 1) -> pd.DataFrame:
     tmp = df[[col, TARGET]].copy()
-    tmp["Diagnosis_binary"] = encode_target(tmp.rename(columns={TARGET: TARGET}))
+    tmp["Diagnosis_binary"] = encode_target(tmp)
     out = (
         tmp.groupby(col, dropna=False)["Diagnosis_binary"]
         .agg(n="size", malignant_n="sum")
@@ -316,6 +351,13 @@ def _save_bar(rate_df: pd.DataFrame, col: str, path: Path, title: str, max_bars:
     fig.tight_layout()
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
+
+
+def _numpy_kde(vals: np.ndarray, xs: np.ndarray) -> np.ndarray:
+    n = len(vals)
+    bw = vals.std(ddof=1) * n ** (-0.2)  # Scott's rule
+    diff = (xs[:, None] - vals[None, :]) / bw
+    return np.exp(-0.5 * diff ** 2).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
 
 
 def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_P1) -> None:
@@ -346,7 +388,11 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_P1) -> None:
     fig, axes = plt.subplots(1, len(CONTINUOUS), figsize=(3.7 * len(CONTINUOUS), 4))
     for ax, col in zip(axes, CONTINUOUS):
         for label, group in df.groupby(TARGET):
-            ax.hist(group[col], bins=45, alpha=0.55, density=True, label=label, color=palette[label])
+            vals = group[col].dropna().values
+            xs = np.linspace(vals.min(), vals.max(), 300)
+            ys = _numpy_kde(vals, xs)
+            ax.plot(xs, ys, label=label, color=palette[label])
+            ax.fill_between(xs, ys, alpha=0.25, color=palette[label])
         ax.set_title(col)
         ax.grid(alpha=0.2)
     axes[-1].legend()
@@ -392,6 +438,9 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_P1) -> None:
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# CSV / JSON outputs
+# ---------------------------------------------------------------------------
 def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = OUT_P1) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     split["outlier_bounds"].to_csv(out_dir / "train_outlier_bounds.csv", index=False)
@@ -420,7 +469,7 @@ def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = O
         ]
     ).to_csv(out_dir / "feature_sets_summary.csv", index=False)
 
-    # New: per-group counts / malignancy rates in train and test, for interpretation.
+    # Per-group counts / malignancy rates in train and test, for interpretation.
     group_diagnostics(split).to_csv(out_dir / "group_malignancy_diagnostics.csv", index=False)
 
     summary = {
