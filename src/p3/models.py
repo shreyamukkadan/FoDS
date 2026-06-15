@@ -21,6 +21,7 @@ import warnings
 from datetime import datetime
 from typing import Dict, List, Tuple
 import joblib
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".matplotlib_cache"))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -36,14 +37,23 @@ from sklearn.metrics import (
     recall_score, roc_auc_score, roc_curve,
 )
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict, cross_val_score
-from src.p1.preprocessing import load_and_preprocess
+from config import ABLATION_FEATURE_SETS, COUNTRY, ETHNICITY
+from src.p1.preprocessing import (
+    build_preprocessor,
+    group_values,
+    load_and_preprocess,
+    load_raw,
+    split_then_filter_outliers,
+    subgroup_view,
+    transformed_feature_names,
+)
 warnings.filterwarnings("ignore")
 try:
     from xgboost import XGBClassifier
     XGBOOST_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     XGBOOST_AVAILABLE = False
-    print("XGBoost not installed — skipping XGBoost.")
+    print(f"XGBoost unavailable — skipping XGBoost ({exc.__class__.__name__}).")
 DATA_PATH = "data/thyroid_cancer_risk_data.csv"
 BASE_OUTPUT_DIR = "outputs/p3"
 RUN_ID = datetime.now().strftime("run_%Y%m%d_%H%M%S")
@@ -61,7 +71,7 @@ RUN_XGBOOST = True
 RUN_BACKWARD_SELECTION = True
 RUN_NESTED_CV_CHECK = True
 NESTED_CV_INNER_FOLDS = 3
-os.makedirs(OUTPUT_DIR, exist_ok=False)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 def title(text: str) -> None:
     print("\n" + "=" * 80 + f"\n{text}\n" + "=" * 80)
 def subtitle(text: str) -> None:
@@ -311,6 +321,104 @@ def evaluate_model_family(models: Dict, X_train, y_train, X_test, y_test, cv, va
                 main_results.append(res)
     return all_results, main_results
 
+
+def compare_predefined_feature_designs(feature_sets: List[str]) -> pd.DataFrame:
+    rows = []
+    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+
+    for feature_set in feature_sets:
+        X_train, X_test, y_train, y_test, feature_names, _ = load_and_preprocess(
+            DATA_PATH,
+            feature_set=feature_set,
+            random_state=RANDOM_STATE,
+            test_size=TEST_SIZE,
+            verbose=False,
+        )
+        model = LogisticRegression(
+            class_weight="balanced",
+            max_iter=1000,
+            solver="lbfgs",
+            random_state=RANDOM_STATE,
+        )
+        probs_cv = cross_val_predict(
+            model,
+            X_train,
+            y_train,
+            cv=cv,
+            method="predict_proba",
+            n_jobs=1,
+        )[:, 1]
+        model.fit(X_train, y_train)
+        probs_test = model.predict_proba(X_test)[:, 1]
+        pred_test = (probs_test >= 0.5).astype(int)
+
+        rows.append({
+            "Feature design": feature_set,
+            "Encoded n_features": len(feature_names),
+            "CV Average Precision": round(average_precision_score(y_train, probs_cv), 4),
+            "Test ROC-AUC": round(roc_auc_score(y_test, probs_test), 4),
+            "Test Average Precision": round(average_precision_score(y_test, probs_test), 4),
+            "Test F1": round(f1_score(y_test, pred_test, zero_division=0), 4),
+            "Test Precision": round(precision_score(y_test, pred_test, zero_division=0), 4),
+            "Test Recall": round(recall_score(y_test, pred_test, zero_division=0), 4),
+        })
+
+    return pd.DataFrame(rows).sort_values("Test Average Precision", ascending=False)
+
+
+def evaluate_subgroup_models(group_col: str, min_train: int = 1000, min_test: int = 200) -> pd.DataFrame:
+    df = load_raw(DATA_PATH)
+    split = split_then_filter_outliers(
+        df,
+        random_state=RANDOM_STATE,
+        test_size=TEST_SIZE,
+    )
+    rows = []
+
+    for value in group_values(split, group_col, min_train=min_train, min_test=min_test):
+        view = subgroup_view(df, split, group_col, value)
+        y_train = view["y_train"]
+        y_test = view["y_test"]
+
+        if y_train.nunique() < 2 or y_test.nunique() < 2:
+            continue
+
+        feature_cols = view["feature_cols"]
+        preprocessor = build_preprocessor(feature_cols)
+        X_train_arr = preprocessor.fit_transform(view["X_train"][feature_cols])
+        X_test_arr = preprocessor.transform(view["X_test"][feature_cols])
+        feature_names = transformed_feature_names(preprocessor)
+        X_train = pd.DataFrame(X_train_arr, columns=feature_names, index=view["X_train"].index)
+        X_test = pd.DataFrame(X_test_arr, columns=feature_names, index=view["X_test"].index)
+
+        model = LogisticRegression(
+            class_weight="balanced",
+            max_iter=1000,
+            solver="lbfgs",
+            random_state=RANDOM_STATE,
+        )
+        model.fit(X_train, y_train)
+        probs = model.predict_proba(X_test)[:, 1]
+        pred = (probs >= 0.5).astype(int)
+
+        rows.append({
+            "Group": group_col,
+            "Value": value,
+            "Train n": len(y_train),
+            "Test n": len(y_test),
+            "Encoded n_features": len(feature_names),
+            "Test ROC-AUC": round(roc_auc_score(y_test, probs), 4),
+            "Test Average Precision": round(average_precision_score(y_test, probs), 4),
+            "Test F1": round(f1_score(y_test, pred, zero_division=0), 4),
+            "Test Precision": round(precision_score(y_test, pred, zero_division=0), 4),
+            "Test Recall": round(recall_score(y_test, pred, zero_division=0), 4),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("Test Average Precision", ascending=False)
+
+
 def barh_plot(df, score_col, std_col, label_col, title_text, xlabel, path):
     d = df.copy().sort_values(score_col, ascending=True)
     fig, ax = plt.subplots(figsize=(9, 4.8))
@@ -427,13 +535,19 @@ def class_weight_sensitivity(X_train, y_train, X_test, y_test, cv):
     return df
 def main() -> None:
     title("P3 — MODEL TRAINING AND EVALUATION")
-    result = load_and_preprocess(DATA_PATH, random_state=RANDOM_STATE, test_size=TEST_SIZE, verbose=True)
+    result = load_and_preprocess(DATA_PATH, feature_set="full", random_state=RANDOM_STATE, test_size=TEST_SIZE, verbose=True)
     if len(result) == 6:
         X_train, X_test, y_train, y_test, feature_names, scaler = result
     else:
         X_train, X_test, y_train, y_test, feature_names = result
         scaler = None
     cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+
+    subtitle("Feature ablation study: seven predefined designs")
+    feature_design_df = compare_predefined_feature_designs(ABLATION_FEATURE_SETS)
+    print(feature_design_df.to_string(index=False))
+    save_csv(feature_design_df, "predefined_feature_design_comparison.csv")
+
     n_benign, n_malignant = int((y_train == 0).sum()), int((y_train == 1).sum())
     imbal_ratio = n_benign / max(n_malignant, 1)
     print(f"\nClass imbalance — Benign: {n_benign:,}, Malignant: {n_malignant:,}, ratio neg/pos: {imbal_ratio:.2f}")
@@ -509,20 +623,41 @@ def main() -> None:
     print(f"\nBest model by {BEST_SELECTION_METRIC}: {best_name}")
     subtitle("Class-weight sensitivity")
     class_weight_sensitivity(Xtr, y_train, Xte, y_test, cv)
+
+    subtitle("Subgroup models by country")
+    country_subgroup_df = evaluate_subgroup_models(COUNTRY)
+    if country_subgroup_df.empty:
+        print("No country subgroup models met the minimum train/test size requirements.")
+    else:
+        print(country_subgroup_df.to_string(index=False))
+        save_csv(country_subgroup_df, "country_subgroup_model_metrics.csv")
+
+    subtitle("Subgroup models by ethnicity")
+    ethnicity_subgroup_df = evaluate_subgroup_models(ETHNICITY)
+    if ethnicity_subgroup_df.empty:
+        print("No ethnicity subgroup models met the minimum train/test size requirements.")
+    else:
+        print(ethnicity_subgroup_df.to_string(index=False))
+        save_csv(ethnicity_subgroup_df, "ethnicity_subgroup_model_metrics.csv")
+
     subtitle("Saving plots and artefacts")
     make_plots(models, main_results, all_results, baselines, best_name, best_model, best_results, X_test, y_test, selected_features)
     artefacts = {
-        "selected_feature_set": selected_set,
+        "main_feature_design": "full",
+        "feature_designs_compared": ABLATION_FEATURE_SETS,
+        "selected_feature_selection_strategy": selected_set,
         "selected_features": selected_features,
         "main_threshold_mode": MAIN_THRESHOLD_MODE,
         "best_model": best_name,
         "best_metrics": clean_result_dict(metrics_df.reset_index().query("Model == @best_name").iloc[0].to_dict()),
         "scaler_saved": scaler is not None,
-        "note": "Scaler is only saved if src.preprocessing.load_and_preprocess returns it as 6th object.",
+        "note": "The saved preprocessing object is the fitted ColumnTransformer returned by P1 load_and_preprocess.",
         "methodology": {
             "train_test_split": "Stratified 80/20 split from preprocessing; held-out test set used only for final evaluation.",
+            "feature_ablation": "Seven predefined feature designs compare full, restricted, risk-only, group-only, risk-plus-groups, continuous-only, and binary-clinical inputs.",
             "feature_selection": "Forward/backward selection performed on training data; nested-CV check repeats FS inside outer folds to document leakage-free estimate.",
             "all_features_baseline": "LogReg/RF/XGB also evaluated with all features using the same CV-based threshold tuning.",
+            "subgroup_models": "Separate logistic-regression subgroup models are trained for Country and Ethnicity values with enough rows; each subgroup reuses the original global train/test split.",
             "class_imbalance": "LogReg/RF use class_weight='balanced'; XGBoost uses scale_pos_weight; threshold tuning uses CV probabilities.",
         },
     }

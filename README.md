@@ -14,7 +14,13 @@ Group project repository for the thyroid cancer risk data science workflow.
 
 ## Setup
 
-From the project root, create and activate a virtual environment:
+From the project root, either activate the existing Conda environment:
+
+```bash
+conda activate fods
+```
+
+Or create and activate a virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -24,7 +30,7 @@ source .venv/bin/activate
 Install the Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 If you are on macOS and P3 fails with a missing `libomp.dylib` error from XGBoost, install the OpenMP runtime with Homebrew:
@@ -36,7 +42,7 @@ brew install libomp
 You can check that XGBoost loads correctly with:
 
 ```bash
-python3 -c "import xgboost; print('xgboost import OK')"
+python -c "import xgboost; print('xgboost import OK')"
 ```
 
 ## Running The Code
@@ -60,7 +66,7 @@ jupyter lab
 To quickly check that the shared P1 preprocessing code runs from the terminal:
 
 ```bash
-python3 -c "from src.p1.preprocessing import load_and_preprocess; load_and_preprocess('data/thyroid_cancer_risk_data.csv')"
+python -c "from src.p1.preprocessing import load_and_preprocess; load_and_preprocess('data/thyroid_cancer_risk_data.csv')"
 ```
 
 ### P2: Statistical Testing
@@ -68,7 +74,7 @@ python3 -c "from src.p1.preprocessing import load_and_preprocess; load_and_prepr
 Run the statistical tests:
 
 ```bash
-python3 -m src.p2.statistical_testing
+python -m src.p2.statistical_testing
 ```
 
 This writes:
@@ -83,7 +89,7 @@ outputs/p2/mann_whitney_results.csv
 Run the full machine learning pipeline:
 
 ```bash
-python3 -m src.p3.models
+python -m src.p3.models
 ```
 
 This creates a new timestamped output folder such as:
@@ -97,8 +103,8 @@ The P3 folder contains model metrics, feature selection tables, plots, model sum
 ## Suggested Full Run Order
 
 ```bash
-python3 -m src.p2.statistical_testing
-python3 -m src.p3.models
+python -m src.p2.statistical_testing
+python -m src.p3.models
 ```
 
 Run the P1 notebook separately through Jupyter when you want to regenerate or inspect the exploratory analysis.

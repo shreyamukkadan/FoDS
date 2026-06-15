@@ -1,6 +1,3 @@
-"""
-Leakage-safe preprocessing and EDA, revised for the "use all the information"
-project direction.
 
 What changed relative to the previous version, and why
 ------------------------------------------------------
@@ -102,10 +99,8 @@ def select_features(df: pd.DataFrame, feature_set: str) -> List[str]:
     cols = all_features(df)
     if feature_set == "full":
         return cols
-    if feature_set == "restricted_original":
+    if feature_set == "restricted":
         return [c for c in cols if c not in [COUNTRY, ETHNICITY, RISK]]
-    if feature_set == "full_without_risk":
-        return [c for c in cols if c != RISK]
     if feature_set == "risk_only":
         return [RISK]
     if feature_set == "groups_only":
@@ -227,6 +222,39 @@ def transformed_feature_names(preprocessor: ColumnTransformer) -> List[str]:
                 pass
         names.extend(list(cols))
     return names
+
+
+def load_and_preprocess(
+    data_path: Path = DATA_PATH,
+    feature_set: str = "full",
+    random_state: int = RANDOM_STATE,
+    test_size: float = TEST_SIZE,
+    verbose: bool = True,
+):
+    df = load_raw(data_path)
+    split = split_then_filter_outliers(
+        df,
+        random_state=random_state,
+        test_size=test_size,
+    )
+
+    feature_cols = select_features(df, feature_set)
+    preprocessor = build_preprocessor(feature_cols)
+    X_train_arr = preprocessor.fit_transform(split["X_train"][feature_cols])
+    X_test_arr = preprocessor.transform(split["X_test"][feature_cols])
+    feature_names = transformed_feature_names(preprocessor)
+
+    X_train = pd.DataFrame(X_train_arr, columns=feature_names, index=split["X_train"].index)
+    X_test = pd.DataFrame(X_test_arr, columns=feature_names, index=split["X_test"].index)
+
+    if verbose:
+        print("\nP1 preprocessing for model training:")
+        print(f"Feature design: {feature_set}")
+        print(f"Train rows after outlier filtering: {len(X_train):,}")
+        print(f"Test rows, unfiltered: {len(X_test):,}")
+        print(f"Encoded features: {len(feature_names):,}")
+
+    return X_train, X_test, split["y_train"], split["y_test"], feature_names, preprocessor
 
 
 # ---------------------------------------------------------------------------

@@ -45,22 +45,20 @@ RISK_ENCODING = "onehot"
 # Feature sets used for P1 summaries / P3 ablations
 ABLATION_FEATURE_SETS = [
     "full",
-    "restricted_original",
-    "full_without_risk",
+    "restricted",
     "risk_only",
-    "groups_only",
     "risk_plus_groups",
+    "groups_only",
     "continuous_only",
     "binary_clinical",
 ]
 
 FEATURE_SET_DESCRIPTIONS = {
-    "full": "All available non-target features, including country, ethnicity, and thyroid cancer risk.",
-    "restricted_original": "Original restricted clinical feature set excluding country, ethnicity, and thyroid cancer risk.",
-    "full_without_risk": "All features except thyroid cancer risk.",
-    "risk_only": "Only the thyroid cancer risk category.",
-    "groups_only": "Only country and ethnicity subgroup variables.",
-    "risk_plus_groups": "Thyroid cancer risk plus country and ethnicity.",
-    "continuous_only": "Only continuous clinical measurements.",
-    "binary_clinical": "Binary clinical history variables plus gender.",
+    "full": "All available variables.",
+    "restricted": "All variables except Country, Ethnicity, and Thyroid_Cancer_Risk.",
+    "risk_only": "Thyroid_Cancer_Risk only.",
+    "risk_plus_groups": "Thyroid_Cancer_Risk plus Country and Ethnicity.",
+    "groups_only": "Country and Ethnicity only.",
+    "continuous_only": "Continuous clinical measurements only.",
+    "binary_clinical": "Binary clinical/lifestyle flags plus Gender.",
 }
