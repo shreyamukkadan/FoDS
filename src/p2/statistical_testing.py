@@ -341,3 +341,87 @@ print("\nSaved output files:")
 print(f" - {chi_path}")
 print(f" - {mw_path}")
 print("\nDone.")
+
+import matplotlib.pyplot as plt
+
+PLOT_DIR = "outputs/p2/plots"
+os.makedirs(PLOT_DIR, exist_ok=True)
+
+
+def plot_malignancy_rate_by_group(df, group_col, title, filename, top_n=None):
+    plot_df = df.copy()
+
+    rates = (
+        plot_df.groupby(group_col)["Diagnosis"]
+        .mean()
+        .sort_values(ascending=True)
+    )
+
+    if top_n is not None:
+        largest_groups = plot_df[group_col].value_counts().head(top_n).index
+        rates = (
+            plot_df[plot_df[group_col].isin(largest_groups)]
+            .groupby(group_col)["Diagnosis"]
+            .mean()
+            .sort_values(ascending=True)
+        )
+
+    overall_rate = plot_df["Diagnosis"].mean()
+
+    plt.figure(figsize=(8, 4.5))
+    plt.barh(rates.index.astype(str), rates.values)
+    plt.axvline(overall_rate, linestyle="--", linewidth=1)
+
+    plt.xlabel("Malignancy rate")
+    plt.title(title)
+    plt.tight_layout()
+
+    save_path = os.path.join(PLOT_DIR, filename)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Saved plot: {save_path}")
+
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Thyroid_Cancer_Risk",
+    "Malignancy rate by Thyroid Cancer Risk",
+    "malignancy_by_thyroid_cancer_risk.png"
+)
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Country",
+    "Malignancy rate by Country (largest groups)",
+    "malignancy_by_country.png",
+    top_n=10
+)
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Ethnicity",
+    "Malignancy rate by Ethnicity",
+    "malignancy_by_ethnicity.png"
+)
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Family_History",
+    "Malignancy rate by Family History",
+    "malignancy_by_family_history.png"
+)
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Radiation_Exposure",
+    "Malignancy rate by Radiation Exposure",
+    "malignancy_by_radiation_exposure.png"
+)
+
+plot_malignancy_rate_by_group(
+    df_clean,
+    "Iodine_Deficiency",
+    "Malignancy rate by Iodine Deficiency",
+    "malignancy_by_iodine_deficiency.png"
+)
