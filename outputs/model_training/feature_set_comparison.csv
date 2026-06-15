@@ -1,0 +1,3 @@
+Feature set,n_features,Features,CV average_precision mean,CV average_precision std
+Forward-selected features,2,"['Thyroid_Cancer_Risk_High', 'Nodule_Size']",0.50126,0.00619
+Full retained features,30,"['Age', 'TSH_Level', 'T3_Level', 'T4_Level', 'Nodule_Size', 'Family_History', 'Radiation_Exposure', 'Iodine_Deficiency', 'Smoking', 'Obesity', 'Diabetes', 'Gender', 'Thyroid_Cancer_Risk_Low', 'Thyroid_Cancer_Risk_Medium', 'Thyroid_Cancer_Risk_High', 'Country_Brazil', 'Country_China', 'Country_Germany', 'Country_India', 'Country_Japan', 'Country_Nigeria', 'Country_Russia', 'Country_South Korea', 'Country_UK', 'Country_USA', 'Ethnicity_African', 'Ethnicity_Asian', 'Ethnicity_Caucasian', 'Ethnicity_Hispanic', 'Ethnicity_Middle Eastern']",0.49906,0.00586

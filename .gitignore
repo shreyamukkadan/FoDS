@@ -3,3 +3,4 @@ __pycache__/
 .matplotlib_cache/
 .vscode/
 .venv/
+*.joblib

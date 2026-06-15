@@ -36,15 +36,11 @@ from config import (
     OUT_PREPROCESSING,
     RANDOM_STATE,
     RISK,
+    RISK_ENCODING,
     TARGET,
     TEST_SIZE,
     Z_THRESHOLD,
 )
-
-try:
-    from config import RISK_ENCODING  # "onehot" (default) or "ordinal"
-except ImportError:
-    RISK_ENCODING = "onehot"
 
 GROUP_COLS = [COUNTRY, ETHNICITY]
 
@@ -180,7 +176,7 @@ def transformed_feature_names(preprocessor: ColumnTransformer) -> List[str]:
             try:
                 names.extend(transformer.get_feature_names_out(cols).tolist())
                 continue
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 pass
         names.extend(list(cols))
     return names

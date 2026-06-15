@@ -1,98 +1,86 @@
-# FoDS Project
+# FoDS Project: Thyroid Cancer Malignancy Prediction
 
-Group project repository for the thyroid cancer risk data science workflow.
+This repository contains the full data science workflow for predicting thyroid cancer diagnosis from a synthetic thyroid cancer risk dataset. The project includes preprocessing, statistical association testing, model training, feature-design comparison, and subgroup evaluation.
 
 ## Project Structure
 
-- `data/` dataset files
-- `src/preprocessing/` shared preprocessing and exploratory-output code
-- `src/statistical_testing/` statistical testing code
-- `src/model_training/` machine learning model training and evaluation code
-- `outputs/preprocessing/` preprocessing summaries and exploratory figures
-- `outputs/statistical_testing/` statistical testing outputs
-- `outputs/model_training/` model training and evaluation outputs
+- `data/` input dataset
+- `config.py` shared paths, column names, split settings, and feature-set definitions
+- `src/preprocessing/` preprocessing pipeline and exploratory outputs
+- `src/statistical_testing/` chi-square and Mann-Whitney statistical tests
+- `src/model_training/` machine learning model training and evaluation
+- `outputs/preprocessing/` preprocessing summaries and figures
+- `outputs/statistical_testing/` statistical test outputs and plots
+- `outputs/model_training/` model metrics, feature-selection outputs, and figures
 
 ## Setup
 
-From the project root, create and activate a virtual environment:
+Run all commands from the project root.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python3 -m pip install -r requirements.txt
 ```
 
-Install the Python dependencies:
+## Run Order
 
 ```bash
-python -m pip install -r requirements.txt
+python3 -m src.preprocessing.pipeline
+python3 -m src.statistical_testing.analysis
+python3 -m src.model_training.train
 ```
 
-## Running The Code
+The model training script may take several minutes because it trains three models, compares predefined feature designs, performs feature selection, and runs subgroup analyses.
 
-Run all commands from the project root.
+## Pipeline Steps
 
-### Preprocessing And Exploratory Outputs
-
-Run the shared preprocessing and exploratory-output pipeline:
+### 1. Preprocessing
 
 ```bash
-python -m src.preprocessing.pipeline
+python3 -m src.preprocessing.pipeline
 ```
 
-This writes preprocessing summaries, group diagnostics, and exploratory figures to:
+This loads the raw data, drops missing rows, performs a stratified train/test split, removes outliers from the training set only, and creates exploratory summaries and figures.
+
+Outputs are written to:
 
 ```text
 outputs/preprocessing/
 ```
 
-To quickly check that the model-ready preprocessing function works:
+### 2. Statistical Testing
 
 ```bash
-python -c "from src.preprocessing.pipeline import load_and_preprocess; load_and_preprocess(verbose=True)"
+python3 -m src.statistical_testing.analysis
 ```
 
-### Statistical Testing
+This runs chi-square tests for categorical variables and Mann-Whitney U tests for continuous variables, with Benjamini-Hochberg FDR correction.
 
-Run the statistical tests:
-
-```bash
-python -m src.statistical_testing.analysis
-```
-
-This writes:
+Outputs are written to:
 
 ```text
-outputs/statistical_testing/chi_square_results.csv
-outputs/statistical_testing/mann_whitney_results.csv
-outputs/statistical_testing/plots/
+outputs/statistical_testing/
 ```
 
-### Model Training And Evaluation
-
-Run the full machine learning pipeline:
+### 3. Model Training and Evaluation
 
 ```bash
-python -m src.model_training.train
+python3 -m src.model_training.train
 ```
 
-This writes model metrics, feature selection tables, plots, model summaries, and saved model artifacts to:
+This trains and evaluates Logistic Regression, Random Forest, and Histogram Gradient Boosting models. It also compares predefined feature designs, performs forward feature selection, evaluates dummy baselines, and runs country/ethnicity subgroup analyses.
+
+Outputs are written to:
 
 ```text
 outputs/model_training/
 ```
 
-The model training pipeline compares Logistic Regression, Random Forest, and Histogram Gradient Boosting.
+Running this script also saves the trained model artifact locally.
 
-## Suggested Full Run Order
+## Reproducibility
 
-```bash
-python -m src.preprocessing.pipeline
-python -m src.statistical_testing.analysis
-python -m src.model_training.train
-```
+The workflow uses a fixed random seed of `42` and an 80/20 stratified train/test split. Preprocessing transformations are fit on the training data only and then applied to held-out data to avoid data leakage.
 
-## Branch Workflow
-
-- `main` is the stable shared branch
-- each team member creates a separate branch from `main`
-- finished work gets merged back into `main`
+Generated outputs in `outputs/` are included so the reported figures and tables can be inspected directly, but all outputs can also be regenerated by running the scripts above.

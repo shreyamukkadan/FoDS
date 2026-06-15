@@ -1,0 +1,4 @@
+Step,Action,Feature,Selected features after step,CV average_precision mean,CV average_precision std,Improvement,Accepted
+1,add,Thyroid_Cancer_Risk_High,['Thyroid_Cancer_Risk_High'],0.44379,0.00342,0.44379,True
+2,add,Nodule_Size,"['Thyroid_Cancer_Risk_High', 'Nodule_Size']",0.50126,0.00619,0.05746,True
+3,stop,Ethnicity_African,"['Thyroid_Cancer_Risk_High', 'Nodule_Size']",0.50184,0.00511,0.00058,False

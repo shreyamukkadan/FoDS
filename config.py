@@ -5,6 +5,8 @@ _ROOT = Path(__file__).resolve().parent
 # Paths
 DATA_PATH = _ROOT / "data" / "thyroid_cancer_risk_data.csv"
 OUT_PREPROCESSING = _ROOT / "outputs" / "preprocessing"
+OUT_STATISTICAL_TESTING = _ROOT / "outputs" / "statistical_testing"
+OUT_MODEL_TRAINING = _ROOT / "outputs" / "model_training"
 
 # Core columns
 ID_COL = "Patient_ID"

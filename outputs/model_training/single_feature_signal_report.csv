@@ -1,0 +1,31 @@
+Feature,CV average_precision mean,CV average_precision std,CV ROC-AUC mean,Random-like flag
+Thyroid_Cancer_Risk_High,0.44379,0.00342,0.69657,False
+Thyroid_Cancer_Risk_Low,0.29086,0.00118,0.61872,False
+Family_History,0.27029,0.00033,0.57582,False
+Ethnicity_Asian,0.26923,0.00078,0.57119,False
+Thyroid_Cancer_Risk_Medium,0.26554,0.00017,0.57785,False
+Country_India,0.25993,0.00114,0.55389,False
+Iodine_Deficiency,0.25638,0.00043,0.55059,False
+Radiation_Exposure,0.25111,0.00077,0.5373,False
+Ethnicity_Caucasian,0.25051,0.0001,0.54535,False
+Ethnicity_Hispanic,0.24144,0.00062,0.52346,True
+Ethnicity_Middle Eastern,0.23822,0.00055,0.51505,True
+Ethnicity_African,0.23768,0.00037,0.51267,True
+Country_China,0.23629,0.00025,0.50987,True
+Country_Nigeria,0.23619,0.0009,0.50957,True
+Country_Brazil,0.23494,0.00039,0.5062,True
+Country_South Korea,0.23484,0.00033,0.50591,True
+TSH_Level,0.23478,0.00066,0.50258,True
+Country_Russia,0.23476,0.00045,0.50569,True
+Country_Japan,0.23469,0.00047,0.50551,True
+Country_USA,0.23431,0.00054,0.50445,True
+Country_UK,0.23405,0.00021,0.50374,True
+Country_Germany,0.23377,0.00066,0.50296,True
+T3_Level,0.23346,0.00038,0.50266,True
+T4_Level,0.2334,0.00119,0.50182,True
+Diabetes,0.23324,0.00028,0.50148,True
+Gender,0.2327,0.00068,0.49997,True
+Obesity,0.2327,0.00026,0.49998,True
+Nodule_Size,0.23251,0.00283,0.4978,True
+Smoking,0.23221,0.0004,0.4986,True
+Age,0.23117,0.00103,0.4984,True
