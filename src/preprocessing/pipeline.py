@@ -297,7 +297,8 @@ def _numpy_kde(vals: np.ndarray, xs: np.ndarray) -> np.ndarray:
 
 
 def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
+    plot_dir = out_dir / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
     palette = {"Benign": "#4C72B0", "Malignant": "#DD8452"}
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
@@ -308,7 +309,7 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
     )
     axes[1].set_title("Thyroid_Cancer_Risk distribution")
     fig.tight_layout()
-    fig.savefig(out_dir / "diagnosis_and_risk_distribution.png", dpi=180, bbox_inches="tight")
+    fig.savefig(plot_dir / "diagnosis_and_risk_distribution.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     fig, axes = plt.subplots(1, len(CONTINUOUS), figsize=(3.2 * len(CONTINUOUS), 4))
@@ -318,7 +319,7 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
         ax.set_xticks([])
         ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(out_dir / "continuous_boxplots_raw.png", dpi=180, bbox_inches="tight")
+    fig.savefig(plot_dir / "continuous_boxplots_raw.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     fig, axes = plt.subplots(1, len(CONTINUOUS), figsize=(3.7 * len(CONTINUOUS), 4))
@@ -333,7 +334,7 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
         ax.grid(alpha=0.2)
     axes[-1].legend()
     fig.tight_layout()
-    fig.savefig(out_dir / "continuous_distributions_by_diagnosis.png", dpi=180, bbox_inches="tight")
+    fig.savefig(plot_dir / "continuous_distributions_by_diagnosis.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
@@ -345,7 +346,7 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
         ax.set_ylim(0, max(0.45, rates["malignancy_rate"].max() * 1.15))
         ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(out_dir / "binary_malignancy_rates.png", dpi=180, bbox_inches="tight")
+    fig.savefig(plot_dir / "binary_malignancy_rates.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     for col, filename in [
@@ -353,7 +354,7 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
         (COUNTRY, "country_malignancy_rates.png"),
         (ETHNICITY, "ethnicity_malignancy_rates.png"),
     ]:
-        _save_bar(malignancy_rates(df, col), col, out_dir / filename, f"Malignancy rate by {col}")
+        _save_bar(malignancy_rates(df, col), col, plot_dir / filename, f"Malignancy rate by {col}")
 
     numeric = df[CONTINUOUS].copy()
     numeric["Diagnosis_binary"] = encode_target(df)
@@ -370,14 +371,15 @@ def write_eda_outputs(df: pd.DataFrame, out_dir: Path = OUT_PREPROCESSING) -> No
             ax.text(j, i, f"{corr.iloc[i, j]:.2f}", ha="center", va="center", fontsize=8)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
-    fig.savefig(out_dir / "correlation_heatmap.png", dpi=180, bbox_inches="tight")
+    fig.savefig(plot_dir / "correlation_heatmap.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
 # Save preprocessing tables and metadata.
 def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = OUT_PREPROCESSING) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    split["outlier_bounds"].to_csv(out_dir / "train_outlier_bounds.csv", index=False)
+    csv_dir = out_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    split["outlier_bounds"].to_csv(csv_dir / "train_outlier_bounds.csv", index=False)
     pd.DataFrame(
         [
             {"Split": "full_after_missing_drop", "n": len(df), "malignant_rate": encode_target(df).mean()},
@@ -389,7 +391,7 @@ def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = O
             {"Split": "train_after_outlier_filter", "n": len(split["X_train"]), "malignant_rate": split["y_train"].mean()},
             {"Split": "test_unfiltered", "n": len(split["X_test"]), "malignant_rate": split["y_test"].mean()},
         ]
-    ).to_csv(out_dir / "train_test_summary.csv", index=False)
+    ).to_csv(csv_dir / "train_test_summary.csv", index=False)
 
     pd.DataFrame(
         [
@@ -401,9 +403,9 @@ def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = O
             }
             for fs in ABLATION_FEATURE_SETS
         ]
-    ).to_csv(out_dir / "feature_sets_summary.csv", index=False)
+    ).to_csv(csv_dir / "feature_sets_summary.csv", index=False)
 
-    group_diagnostics(split).to_csv(out_dir / "group_malignancy_diagnostics.csv", index=False)
+    group_diagnostics(split).to_csv(csv_dir / "group_malignancy_diagnostics.csv", index=False)
 
     summary = {
         "rows_raw": int(df.attrs.get("rows_raw", len(df))),
@@ -418,7 +420,7 @@ def write_preprocessing_outputs(df: pd.DataFrame, split: Dict, out_dir: Path = O
         "main_leakage_rule": "Split first; outlier bounds learned on train only; test set not filtered.",
         "subgroup_rule": "Per-group models reuse the global split (same patients), never re-split.",
     }
-    (out_dir / "preprocessing_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (csv_dir / "preprocessing_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
 def main() -> None:

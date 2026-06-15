@@ -61,6 +61,8 @@ warnings.filterwarnings("ignore")
 
 DATA_PATH = CONFIG_DATA_PATH
 OUTPUT_DIR = str(OUT_MODEL_TRAINING)
+CSV_DIR = os.path.join(OUTPUT_DIR, "csv")
+PLOT_DIR = os.path.join(OUTPUT_DIR, "plots")
 
 RANDOM_STATE = 42
 CV_FOLDS = 3
@@ -84,8 +86,8 @@ def subtitle(text: str) -> None:
 
 
 def save_csv(df: pd.DataFrame, name: str) -> str:
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    path = os.path.join(OUTPUT_DIR, name)
+    os.makedirs(CSV_DIR, exist_ok=True)
+    path = os.path.join(CSV_DIR, name)
     df.to_csv(path, index=False)
     return path
 
@@ -609,7 +611,7 @@ def plot_confusion(results, y_test, filename, suptitle):
 
     fig.suptitle(suptitle, fontsize=13, y=1.05)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, filename), dpi=150, bbox_inches="tight")
+    fig.savefig(os.path.join(PLOT_DIR, filename), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -623,7 +625,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
     ax.legend(loc="lower right")
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "roc_curves.png"), dpi=150)
+    fig.savefig(os.path.join(PLOT_DIR, "roc_curves.png"), dpi=150)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -640,7 +642,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "precision_recall_curves.png"), dpi=150)
+    fig.savefig(os.path.join(PLOT_DIR, "precision_recall_curves.png"), dpi=150)
     plt.close(fig)
 
     plot_confusion(main_results, y_test, "confusion_matrices_models.png", f"Confusion Matrices — model comparison, threshold mode: {MAIN_THRESHOLD_MODE}")
@@ -666,7 +668,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
     ax.legend(ncol=2)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "metric_comparison.png"), dpi=150)
+    fig.savefig(os.path.join(PLOT_DIR, "metric_comparison.png"), dpi=150)
     plt.close(fig)
 
     proba = best_model.predict_proba(X_test[selected_features])[:, 1]
@@ -677,7 +679,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "probability_overlap_best_model.png"), dpi=150)
+    fig.savefig(os.path.join(PLOT_DIR, "probability_overlap_best_model.png"), dpi=150)
     plt.close(fig)
 
     importance = getattr(best_model, "feature_importances_", None)
@@ -692,7 +694,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
         ax.set_title(f"Feature importance — {best_name}")
         ax.grid(axis="x", alpha=0.3)
         fig.tight_layout()
-        fig.savefig(os.path.join(OUTPUT_DIR, "feature_importance_best_model.png"), dpi=150)
+        fig.savefig(os.path.join(PLOT_DIR, "feature_importance_best_model.png"), dpi=150)
         plt.close(fig)
 
     p, rec, thr = precision_recall_curve(y_test, proba)
@@ -711,7 +713,7 @@ def make_plots(models, main_results, all_results, baselines, best_name, best_mod
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "threshold_diagnostics_best_model.png"), dpi=150)
+    fig.savefig(os.path.join(PLOT_DIR, "threshold_diagnostics_best_model.png"), dpi=150)
     plt.close(fig)
 
 
@@ -777,13 +779,15 @@ def class_weight_sensitivity(X_train, y_train, X_test, y_test, cv):
     axes[1].legend()
     fig.suptitle("Class-weight sensitivity: threshold retuning can neutralise class_weight effects", y=1.03)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, "class_weight_sensitivity.png"), dpi=150, bbox_inches="tight")
+    fig.savefig(os.path.join(PLOT_DIR, "class_weight_sensitivity.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
     return df
 
 
 def main() -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(CSV_DIR, exist_ok=True)
+    os.makedirs(PLOT_DIR, exist_ok=True)
     title("MODEL TRAINING AND EVALUATION")
     X_train, X_test, y_train, y_test, feature_names, preprocessor = load_and_preprocess(
         DATA_PATH,
@@ -798,7 +802,7 @@ def main() -> None:
     feature_design_df = compare_predefined_feature_designs(ABLATION_FEATURE_SETS)
     print(feature_design_df.to_string(index=False))
     save_csv(feature_design_df, "predefined_feature_design_comparison.csv")
-    plot_feature_design_comparison(feature_design_df, os.path.join(OUTPUT_DIR, "feature_design_comparison.png"))
+    plot_feature_design_comparison(feature_design_df, os.path.join(PLOT_DIR, "feature_design_comparison.png"))
 
     n_benign, n_malignant = int((y_train == 0).sum()), int((y_train == 1).sum())
     imbal_ratio = n_benign / max(n_malignant, 1)
@@ -838,7 +842,7 @@ def main() -> None:
         "Feature set",
         "Feature selection comparison",
         f"CV {FEATURE_SELECTION_SCORING}",
-        os.path.join(OUTPUT_DIR, "feature_selection_comparison.png"),
+        os.path.join(PLOT_DIR, "feature_selection_comparison.png"),
     )
     Xtr, Xte = X_train[selected_features].copy(), X_test[selected_features].copy()
 
@@ -920,7 +924,7 @@ def main() -> None:
         subgroup_auc_plot(
             country_subgroup_df,
             "Separate Logistic Regression by Country",
-            os.path.join(OUTPUT_DIR, "separate_model_performance_by_country.png"),
+            os.path.join(PLOT_DIR, "separate_model_performance_by_country.png"),
         )
 
     subtitle("Subgroup models by ethnicity")
@@ -933,7 +937,7 @@ def main() -> None:
         subgroup_auc_plot(
             ethnicity_subgroup_df,
             "Separate Logistic Regression by Ethnicity",
-            os.path.join(OUTPUT_DIR, "separate_model_performance_by_ethnicity.png"),
+            os.path.join(PLOT_DIR, "separate_model_performance_by_ethnicity.png"),
         )
 
     subtitle("Full model performance by subgroup")
@@ -944,12 +948,12 @@ def main() -> None:
     subgroup_auc_plot(
         full_country_df,
         "Full Model Performance by Country",
-        os.path.join(OUTPUT_DIR, "full_model_performance_by_country.png"),
+        os.path.join(PLOT_DIR, "full_model_performance_by_country.png"),
     )
     subgroup_auc_plot(
         full_ethnicity_df,
         "Full Model Performance by Ethnicity",
-        os.path.join(OUTPUT_DIR, "full_model_performance_by_ethnicity.png"),
+        os.path.join(PLOT_DIR, "full_model_performance_by_ethnicity.png"),
     )
 
     subtitle("Saving plots and artefacts")
@@ -975,7 +979,7 @@ def main() -> None:
             "class_imbalance": "Logistic Regression, Random Forest, and HistGradientBoosting use class_weight='balanced'; threshold tuning uses CV probabilities.",
         },
     }
-    with open(os.path.join(OUTPUT_DIR, "model_summary.json"), "w") as f:
+    with open(os.path.join(CSV_DIR, "model_summary.json"), "w") as f:
         json.dump(artefacts, f, indent=2)
 
     joblib.dump(

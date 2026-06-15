@@ -27,6 +27,7 @@ except ImportError:
 
 
 OUTPUT_DIR = OUT_STATISTICAL_TESTING
+CSV_DIR = OUTPUT_DIR / "csv"
 PLOT_DIR = OUTPUT_DIR / "plots"
 
 CONTINUOUS_COLS = ["Age", "TSH_Level", "T3_Level", "T4_Level", "Nodule_Size"]
@@ -320,6 +321,7 @@ def print_summary(df_clean: pd.DataFrame, split: dict, chi_results_df: pd.DataFr
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    CSV_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     if not STATSMODELS_AVAILABLE:
@@ -335,8 +337,8 @@ def main() -> None:
 
     print_summary(df_clean, split, chi_results_df, mw_results_df)
 
-    chi_path = OUTPUT_DIR / "chi_square_results.csv"
-    mw_path = OUTPUT_DIR / "mann_whitney_results.csv"
+    chi_path = CSV_DIR / "chi_square_results.csv"
+    mw_path = CSV_DIR / "mann_whitney_results.csv"
     chi_results_df.to_csv(chi_path, index=False)
     mw_results_df.to_csv(mw_path, index=False)
     save_plots(df_clean)
@@ -344,6 +346,7 @@ def main() -> None:
     print("\nSaved output files:")
     print(f" - {chi_path}")
     print(f" - {mw_path}")
+    print(f" - {CSV_DIR}")
     print(f" - {PLOT_DIR}")
     print("\nDone.")
 

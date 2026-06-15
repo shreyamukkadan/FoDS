@@ -1,2 +1,0 @@
-Direction,Outer CV AP mean,Outer CV AP std,Outer CV AP scores,Mean n_features,Features when fit on full training set,Selected features per fold
-forward,0.49817,0.00375,"[0.49824, 0.50272, 0.49354]",2.67,"['Thyroid_Cancer_Risk_High', 'Nodule_Size']","[['Thyroid_Cancer_Risk_High', 'Nodule_Size', 'Country_Russia'], ['Thyroid_Cancer_Risk_High', 'TSH_Level', 'Country_Nigeria'], ['Thyroid_Cancer_Risk_High', 'Nodule_Size']]"

@@ -1,5 +1,0 @@
-Split,n,malignant_rate
-full_after_missing_drop,212679,0.23271220948001448
-train_before_outlier_filter,170143,
-train_after_outlier_filter,170142,0.2327056223624972
-test_unfiltered,42536,0.23272051908971225

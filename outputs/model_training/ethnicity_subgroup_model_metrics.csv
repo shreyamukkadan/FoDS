@@ -1,6 +1,0 @@
-Group,Value,Train n,Test n,Encoded n_features,Test ROC-AUC,Test Average Precision,Test F1,Test Precision,Test Recall
-Ethnicity,Asian,42563,10695,25,0.7738,0.6195,0.6996,0.7031,0.6962
-Ethnicity,African,33944,8468,25,0.7229,0.5462,0.6022,0.7034,0.5265
-Ethnicity,Middle Eastern,17148,4187,25,0.6099,0.3436,0.325,0.4576,0.252
-Ethnicity,Caucasian,50843,12822,25,0.5886,0.3359,0.3132,0.7038,0.2014
-Ethnicity,Hispanic,25644,6364,25,0.5738,0.3064,0.2855,0.6391,0.1838
