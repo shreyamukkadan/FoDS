@@ -34,13 +34,16 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, List
 
 try:
-    _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 except NameError:  # running inside a Jupyter / VS Code notebook cell, where __file__ is undefined
     _PROJECT_ROOT = Path.cwd()
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(_PROJECT_ROOT / ".matplotlib_cache"))
 
 import matplotlib
