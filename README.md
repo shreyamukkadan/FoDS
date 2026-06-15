@@ -5,22 +5,16 @@ Group project repository for the thyroid cancer risk data science workflow.
 ## Project Structure
 
 - `data/` dataset files
-- `notebooks/` exploratory notebooks and exported P1 figures
-- `src/p1/` shared preprocessing code
-- `src/p2/` statistical testing code
-- `src/p3/` machine learning model training and evaluation code
-- `outputs/p2/` statistical testing outputs
-- `outputs/p3/` timestamped P3 model outputs
+- `src/preprocessing/` shared preprocessing and exploratory-output code
+- `src/statistical_testing/` statistical testing code
+- `src/model_training/` machine learning model training and evaluation code
+- `outputs/preprocessing/` preprocessing summaries and exploratory figures
+- `outputs/statistical_testing/` statistical testing outputs
+- `outputs/model_training/` model training and evaluation outputs
 
 ## Setup
 
-From the project root, either activate the existing Conda environment:
-
-```bash
-conda activate fods
-```
-
-Or create and activate a virtual environment:
+From the project root, create and activate a virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -33,81 +27,69 @@ Install the Python dependencies:
 python -m pip install -r requirements.txt
 ```
 
-If you are on macOS and P3 fails with a missing `libomp.dylib` error from XGBoost, install the OpenMP runtime with Homebrew:
-
-```bash
-brew install libomp
-```
-
-You can check that XGBoost loads correctly with:
-
-```bash
-python -c "import xgboost; print('xgboost import OK')"
-```
-
 ## Running The Code
 
 Run all commands from the project root.
 
-### P1: Exploratory Data Analysis
+### Preprocessing And Exploratory Outputs
 
-Open the notebook:
-
-```bash
-jupyter notebook notebooks/p1_eda.ipynb
-```
-
-Or start JupyterLab if you prefer:
+Run the shared preprocessing and exploratory-output pipeline:
 
 ```bash
-jupyter lab
+python -m src.preprocessing.pipeline
 ```
 
-To quickly check that the shared P1 preprocessing code runs from the terminal:
+This writes preprocessing summaries, group diagnostics, and exploratory figures to:
+
+```text
+outputs/preprocessing/
+```
+
+To quickly check that the model-ready preprocessing function works:
 
 ```bash
-python -c "from src.p1.preprocessing import load_and_preprocess; load_and_preprocess('data/thyroid_cancer_risk_data.csv')"
+python -c "from src.preprocessing.pipeline import load_and_preprocess; load_and_preprocess(verbose=True)"
 ```
 
-### P2: Statistical Testing
+### Statistical Testing
 
 Run the statistical tests:
 
 ```bash
-python -m src.p2.statistical_testing
+python -m src.statistical_testing.analysis
 ```
 
 This writes:
 
 ```text
-outputs/p2/chi_square_results.csv
-outputs/p2/mann_whitney_results.csv
+outputs/statistical_testing/chi_square_results.csv
+outputs/statistical_testing/mann_whitney_results.csv
+outputs/statistical_testing/plots/
 ```
 
-### P3: Model Training And Evaluation
+### Model Training And Evaluation
 
 Run the full machine learning pipeline:
 
 ```bash
-python -m src.p3.models
+python -m src.model_training.train
 ```
 
-This creates a new timestamped output folder such as:
+This writes model metrics, feature selection tables, plots, model summaries, and saved model artifacts to:
 
 ```text
-outputs/p3/run_YYYYMMDD_HHMMSS/
+outputs/model_training/
 ```
 
-The P3 folder contains model metrics, feature selection tables, plots, model summaries, and saved model artifacts.
+The model training pipeline compares Logistic Regression, Random Forest, and Histogram Gradient Boosting.
 
 ## Suggested Full Run Order
 
 ```bash
-python -m src.p2.statistical_testing
-python -m src.p3.models
+python -m src.preprocessing.pipeline
+python -m src.statistical_testing.analysis
+python -m src.model_training.train
 ```
-
-Run the P1 notebook separately through Jupyter when you want to regenerate or inspect the exploratory analysis.
 
 ## Branch Workflow
 

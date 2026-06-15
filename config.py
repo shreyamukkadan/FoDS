@@ -4,7 +4,7 @@ _ROOT = Path(__file__).resolve().parent
 
 # Paths
 DATA_PATH = _ROOT / "data" / "thyroid_cancer_risk_data.csv"
-OUT_P1 = _ROOT / "outputs" / "p1_preprocessing"
+OUT_PREPROCESSING = _ROOT / "outputs" / "preprocessing"
 
 # Core columns
 ID_COL = "Patient_ID"
@@ -38,11 +38,11 @@ RANDOM_STATE = 42
 TEST_SIZE = 0.20
 Z_THRESHOLD = 3
 
-# Risk encoding used by P1 preprocessing
+# Risk encoding used by preprocessing
 # Options: "onehot" or "ordinal"
 RISK_ENCODING = "onehot"
 
-# Feature sets used for P1 summaries / P3 ablations
+# Feature sets used for preprocessing summaries and model-training ablations
 ABLATION_FEATURE_SETS = [
     "full",
     "restricted",
